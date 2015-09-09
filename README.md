@@ -40,9 +40,11 @@ Here, `<model_name>` must be one of `caffenet`, `googlenet`, or `vgg`.
 Original image: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, licenced via Creative Commons. The result was generated in less than 100 BFGS iterations with random initialization of the image.
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="30%"/>
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/san_francisco.jpg" width="30%"/>
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_sanfran.jpg" width="30%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
+</p>
+<p>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/san_francisco.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_sanfran.jpg" width="40%"/>
 </p>
 
 More examples coming soon.
