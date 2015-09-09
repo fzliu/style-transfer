@@ -37,12 +37,12 @@ Here, `<model_name>` must be one of `caffenet`, `googlenet`, or `vgg`.
 
 ## Sample
 
-Original image: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, licenced via Creative Commons. The result was generated in less than 100 BFGS iterations with random initialization of the image.
+Original image: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, licenced via Creative Commons. The result was generated in just over two minutes on an NVidia GeForce GT 750M GPU. The output image was initialized with random pixels, and fewer than than 100 BFGS iterations were performed to generate the final result.
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
 </p>
-<p>
+<p align="center">
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/san_francisco.jpg" width="40%"/>
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_sanfran.jpg" width="40%"/>
 </p>
