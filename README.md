@@ -2,7 +2,7 @@
 
 ## Introduction
 
-A pyCaffe-based implementation of "A Neural Algorithm of Artistic Style" by L. Gatys, A. Ecker, and M. Bethge. This paper presents a method for transferring the style of one input image onto another. You can read the paper here: http://arxiv.org/abs/1508.06576. 
+This repository contains a pyCaffe-based implementation of "A Neural Algorithm of Artistic Style" by L. Gatys, A. Ecker, and M. Bethge, which presents a method for transferring the artistic style of one input image onto another. You can read the paper here: http://arxiv.org/abs/1508.06576. 
 
 Neural net operations are handled by Caffe, while loss minimization and other miscellaneous matrix operations are performed using numpy and scipy. L-BFGS is used for minimization.
 
@@ -37,10 +37,8 @@ Here, `<model_name>` must be one of `caffenet`, `googlenet`, or `vgg`.
 
 ## Sample
 
-Original image: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497), by Anh Dinh, licenced via Creative Commons. 
+Original image: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, licenced via Creative Commons. The result was generated in less than 100 BFGS iterations with random initialization of the image.
 
-![](images/starry_night.jpg)
-![](images/san_francisco.jpg)
-![](images/starry_sanfran.jpg)
+![](images/starry_night.jpg)![](images/san_francisco.jpg)![](images/starry_sanfran.jpg)
 
 More examples coming soon.
