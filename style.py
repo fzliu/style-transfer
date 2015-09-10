@@ -251,10 +251,9 @@ class StyleTransfer(object):
         """
 
         # prettify the generated image and show it
-        img = self.transformer.deprocess("data", self.net_in.data)*255
-        img = caffe.io.resize_image(img.astype(np.uint8), 
-                                    self.orig_dims, 
-                                    interp_order=3)
+        img = self.transformer.deprocess("data", self.net_in.data)
+        img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
+        img = (255*img).astype(np.uint8)
         imsave(path, img)
 
     def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
