@@ -202,7 +202,7 @@ class StyleTransfer(object):
             pretrained_file = os.path.join(base_path, "bvlc_googlenet.caffemodel")
             weights = GOOGLENET_WEIGHTS
 
-        # caffenet
+        # vgg net
         elif model_name == "vgg":
             model_file = os.path.join(base_path, "VGG_ILSVRC_19_layers_deploy.prototxt")
             pretrained_file = os.path.join(base_path, "VGG_ILSVRC_19_layers.caffemodel")
