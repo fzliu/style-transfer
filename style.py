@@ -252,7 +252,7 @@ class StyleTransfer(object):
         """
 
         # prettify the generated image and show it
-        img = self.transformer.deprocess("data", self.net_in.data)
+        img = self.transformer.deprocess("data", self.net_in.data)*255
         img = denoise_bilateral(img.astype(np.uint8), sigma_range=0.05)
         img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
         imsave(path, img)
