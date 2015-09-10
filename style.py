@@ -43,7 +43,7 @@ import caffe
 import numpy as np
 from scipy.optimize import minimize
 from skimage.io import imsave
-from skimage.restoration import denoise_tv_bregman
+from skimage.restoration import denoise_bilateral
 
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
@@ -82,6 +82,7 @@ parser.add_argument("-m", "--model", default="googlenet", type=str, required=Fal
 parser.add_argument("-r", "--ratio", default=1.25e6, type=int, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
+parser.add_argument("-o", "--output", default="result.jpg", required=False, help="output path")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -111,7 +112,7 @@ def _compute_style_gradient(F, G_style, layer):
     (nl, ml) = Fl.shape
     c = 1.0/(nl**2*ml**2)
     Gl_delta = Gl - G_style[layer]
-    loss = c/4*np.sum(Gl_delta**2)/4
+    loss = c/4*np.sum(Gl_delta**2)
     grad = c*Gl_delta.dot(Fl)# * (Fl>0)
 
     return loss, grad
@@ -252,8 +253,8 @@ class StyleTransfer(object):
 
         # prettify the generated image and show it
         img = self.transformer.deprocess("data", self.net_in.data)
+        img = denoise_bilateral(img.astype(np.uint8), sigma_range=0.05)
         img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
-        #img = denoise_tv_bregman(img, 20)
         imsave(path, img)
 
     def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
@@ -319,4 +320,4 @@ if __name__ == "__main__":
     print("Took {0:.0f} seconds".format(end-start))
 
     # DONE!
-    st.save_generated("result.jpg")
+    st.save_generated(args.output)
