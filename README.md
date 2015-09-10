@@ -37,7 +37,7 @@ Here, `<model_name>` must be one of `caffenet`, `googlenet`, or `vgg`.
 
 ## Sample
 
-Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, [Nanjing in winter snow, 2008](https://www.flickr.com/photos/emmajg/3199018106) by Emma Gawen, and _____. All images were released under the Creative Comments license. All results were generated in around two minutes on an NVidia GeForce GT 750M GPU running the GoogleNet model. Each output image was initialized with the content image, 100 BFGS iterations were performed to generate the final result in each case.
+Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh. All images were released under the Creative Comments license. All results were generated in around two minutes on an NVidia GeForce GT 750M GPU running the GoogleNet model. Each output image was initialized with the content image, 100 BFGS iterations were performed to generate the final result in each case.
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
