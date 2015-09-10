@@ -79,8 +79,9 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
-parser.add_argument("-r", "--ratio", default=1.2e6, type=int, required=False, help="style-to-content ratio")
+parser.add_argument("-r", "--ratio", default=1.25e6, type=int, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
+parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -89,9 +90,10 @@ def _compute_content_gradient(F, F_content, layer):
     """
 
     # compute loss and gradient
-    Fl_delta = F[layer]-F_content[layer]
+    Fl = F[layer]
+    Fl_delta = Fl-F_content[layer]
     loss = np.sum(Fl_delta**2)/2
-    grad = Fl_delta
+    grad = Fl_delta# * (Fl>0)
 
     return loss, grad
 
@@ -110,8 +112,7 @@ def _compute_style_gradient(F, G_style, layer):
     c = 1.0/(nl**2*ml**2)
     Gl_delta = Gl - G_style[layer]
     loss = c/4*np.sum(Gl_delta**2)/4
-    grad = c*Gl_delta.dot(Fl)
-    grad = grad.reshape(Fl.shape)
+    grad = c*Gl_delta.dot(Fl)# * (Fl>0)
 
     return loss, grad
 
@@ -252,10 +253,10 @@ class StyleTransfer(object):
         # prettify the generated image and show it
         img = self.transformer.deprocess("data", self.net_in.data)
         img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
-        img = denoise_tv_bregman(img, 10)
+        #img = denoise_tv_bregman(img, 20)
         imsave(path, img)
 
-    def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500):
+    def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -279,9 +280,9 @@ class StyleTransfer(object):
         content_data = self.transformer.preprocess("data", img_content)
         F_content = _compute_activations(self.net, content_layers, content_data)
 
-        # initialize input
-        img0 = np.random.rand(*img_content.shape)
-        data = self.transformer.preprocess("data", img0)
+        # initialize input with content image
+        # from kaishengtai/neuralart
+        data = self.transformer.preprocess("data", img_content)
         self.net_in.data[0] = data
 
         # compute data bounds
@@ -293,7 +294,7 @@ class StyleTransfer(object):
 
         # perform optimization
         minfn_args = (G_style, F_content, self.net, self.weights, ratio)
-        lbfgs_opts = {"maxiter": n_iter, "disp": False}
+        lbfgs_opts = {"maxiter": n_iter, "disp": debug}
         return minimize(style_optimizer, self.net_in.data.flatten(), 
                         args=minfn_args, method="L-BFGS-B", jac=True,
                         bounds=data_bounds, options=lbfgs_opts).nit
@@ -311,7 +312,8 @@ if __name__ == "__main__":
     n_iters = st.transfer_style(caffe.io.load_image(args.style_img), 
                                 caffe.io.load_image(args.content_img), 
                                 ratio=args.ratio,
-                                n_iter=args.max_iters)
+                                n_iter=args.max_iters,
+                                debug=args.debug)
     end = timeit.default_timer()
     print("Ran {0} iterations".format(n_iters))
     print("Took {0:.0f} seconds".format(end-start))
