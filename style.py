@@ -43,7 +43,6 @@ import caffe
 import numpy as np
 from scipy.optimize import minimize
 from skimage.io import imsave
-from skimage.restoration import denoise_bilateral
 
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
@@ -253,8 +252,8 @@ class StyleTransfer(object):
 
         # prettify the generated image and show it
         img = self.transformer.deprocess("data", self.net_in.data)
-        img = denoise_bilateral(img.astype(np.uint8), sigma_range=0.05)
         img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
+        img = (255*img).astype(np.uint8)
         imsave(path, img)
 
     def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
