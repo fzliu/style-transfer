@@ -27,9 +27,9 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 TODOs:
-  - Fix VGG Caffe model.
-  - Move matrix operations to GPU.
+  - Move matrix operations to GPU (numba?).
   - Expand arguments and options.
+  - Initialize with 'white', 'pink', or 'content'
 """
 
 # system imports
@@ -78,7 +78,7 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
-parser.add_argument("-r", "--ratio", default=1.25e6, type=int, required=False, help="style-to-content ratio")
+parser.add_argument("-r", "--ratio", default="1.25e6", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-a", "--scale-output", default=1, type=float, required=False, help="output img scale")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
@@ -249,9 +249,9 @@ class StyleTransfer(object):
         """
             Displays the generated image (net input).
         """
-
-	if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
+	if os.path.dirname(path): # if dir to output was included
+	    if not os.path.exists(os.path.dirname(path)): # if dir does not exist
+                os.makedirs(os.path.dirname(path))
 
         # prettify the generated image and save it
         img = self.transformer.deprocess("data", self.net_in.data)
@@ -317,7 +317,7 @@ if __name__ == "__main__":
     start = timeit.default_timer()
     n_iters = st.transfer_style(img_style, 
                                 img_content, 
-                                ratio=args.ratio,
+                                ratio=np.float(args.ratio),
                                 n_iter=args.max_iters,
                                 debug=args.debug)
     end = timeit.default_timer()
