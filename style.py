@@ -49,7 +49,7 @@ CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..",
 MODEL_DIR = "models"
 
 # weights for the individual models
-VGG_WEIGHTS = {"content": {"conv1_1": 1},
+VGG_WEIGHTS = {"content": {"conv4_2": 1},
                "style": {"conv1_1": 0.2,
                          "conv2_1": 0.2,
                          "conv3_1": 0.2,
@@ -80,8 +80,9 @@ parser.add_argument("-c", "--content-img", type=str, required=True, help="input 
 parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
 parser.add_argument("-r", "--ratio", default=1.25e6, type=int, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
+parser.add_argument("-a", "--scale-output", default=1, type=float, required=False, help="output img scale")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
-parser.add_argument("-o", "--output", default="result.jpg", required=False, help="output path")
+parser.add_argument("-o", "--output", default="output/result.jpg", required=False, help="output path")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -134,7 +135,6 @@ def _compute_activations(net, layers, data):
 
     return F
 
-
 def style_optimizer(x, G_style, F_content, net, weights, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
@@ -185,7 +185,7 @@ class StyleTransfer(object):
         Style transfer class.
     """
 
-    def __init__(self, model_name):
+    def __init__(self, model_name, model_dim):
         """
             Initialize the model used for style transfer.
 
@@ -214,10 +214,10 @@ class StyleTransfer(object):
             weights = CAFFENET_WEIGHTS
 
         # load model
-        self.load_model(model_file, pretrained_file)
+        self.load_model(model_file, pretrained_file, model_dim)
         self.weights = weights
 
-    def load_model(self, model_file, pretrained_file):
+    def load_model(self, model_file, pretrained_file, model_dim):
         """
             Loads specified model from caffe install (see caffe docs).
 
@@ -230,7 +230,7 @@ class StyleTransfer(object):
 
         # load net
         net = caffe.Net(model_file, pretrained_file, caffe.TEST)
-        net.blobs["data"].reshape(1, 3, 227, 227)
+        net.blobs["data"].reshape(1, model_dim[2], model_dim[0], model_dim[1])
 
         # all models used are trained on imagenet data
         mean_path = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
@@ -250,11 +250,14 @@ class StyleTransfer(object):
             Displays the generated image (net input).
         """
 
-        # prettify the generated image and show it
+	if not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
+
+        # prettify the generated image and save it
         img = self.transformer.deprocess("data", self.net_in.data)
-        img = caffe.io.resize_image(img, self.orig_dims, interp_order=3)
         img = (255*img).astype(np.uint8)
         imsave(path, img)
+    
 
     def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
         """
@@ -266,8 +269,6 @@ class StyleTransfer(object):
             :param numpy.ndarray img_content:
                 A content image in 8-bit, RGB format.
         """
-
-        self.orig_dims = img_content.shape
 
         # compute style representations
         style_layers = self.weights["style"].keys()
@@ -303,14 +304,19 @@ class StyleTransfer(object):
 if __name__ == "__main__":
     caffe.set_mode_gpu()
     args = parser.parse_args()
+
+    img_style = caffe.io.load_image(args.style_img)
+    img_content = caffe.io.load_image(args.content_img)
+
+    out_shape = tuple(np.int(x * args.scale_output) for x in img_content.shape[:2]) + img_content.shape[2:]
     
     # artistic style class
-    st = StyleTransfer(args.model)
+    st = StyleTransfer(args.model, out_shape)
 
     # style transfer
     start = timeit.default_timer()
-    n_iters = st.transfer_style(caffe.io.load_image(args.style_img), 
-                                caffe.io.load_image(args.content_img), 
+    n_iters = st.transfer_style(img_style, 
+                                img_content, 
                                 ratio=args.ratio,
                                 n_iter=args.max_iters,
                                 debug=args.debug)
