@@ -42,6 +42,7 @@ import timeit
 import caffe
 import numpy as np
 from scipy.optimize import minimize
+from scipy.linalg.blas import dgemm
 from skimage.io import imsave
 
 
@@ -83,6 +84,7 @@ parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, 
 parser.add_argument("-a", "--scale-output", default=1, type=float, required=False, help="output img scale")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
 parser.add_argument("-o", "--output", default="output/result.jpg", required=False, help="output path")
+parser.add_argument('-g', '--gpu_id', default=-1, type=int, required=False, help="gpu device number")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -106,14 +108,14 @@ def _compute_style_gradient(F, G_style, layer):
 
     # compute Gram matrix
     Fl = F[layer]
-    Gl = Fl.dot(Fl.T)
+    Gl = dgemm(1.0,Fl,Fl.T)
 
     # compute loss and gradient
     (nl, ml) = Fl.shape
     c = 1.0/(nl**2*ml**2)
     Gl_delta = Gl - G_style[layer]
     loss = c/4*np.sum(Gl_delta**2)
-    grad = c*Gl_delta.dot(Fl)# * (Fl>0)
+    grad = c*dgemm(1.0,Gl_delta,Fl)# * (Fl>0)
 
     return loss, grad
 
@@ -274,7 +276,7 @@ class StyleTransfer(object):
         style_layers = self.weights["style"].keys()
         style_data = self.transformer.preprocess("data", img_style)
         F_style = _compute_activations(self.net, style_layers, style_data)
-        G_style = {l: F_style[l].dot(F_style[l].T) for l in F_style}
+        G_style = {l: dgemm(1.0,F_style[l],F_style[l].T) for l in F_style}
 
         # compute content representations
         content_layers = self.weights["content"].keys()
@@ -302,8 +304,15 @@ class StyleTransfer(object):
 
 
 if __name__ == "__main__":
-    caffe.set_mode_gpu()
     args = parser.parse_args()
+
+    if args.gpu_id == -1:
+        print 'running on cpu'
+        caffe.set_mode_cpu()
+    else:
+        print 'running on gpu %d' % args.gpu_id
+        caffe.set_device(args.gpu_id)
+        caffe.set_mode_gpu()
 
     img_style = caffe.io.load_image(args.style_img)
     img_content = caffe.io.load_image(args.content_img)
