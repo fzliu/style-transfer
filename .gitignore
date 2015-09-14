@@ -1,2 +1,3 @@
 *.caffemodel
-result.jpg
+output/*
+test/*

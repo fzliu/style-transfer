@@ -1,4 +1,4 @@
-name: "GoogleNet"
+name: "VGG_ILSVRC_19_layers"
 input: "data"
 force_backward: true
 input_shape {
