@@ -65,7 +65,7 @@ GOOGLENET_WEIGHTS = {"content": {"conv1/7x7_s2": 1},
                                "inception_4b/1x1": 0.125,
                                "inception_4c/1x1": 0.125,
                                "inception_4d/1x1": 0.125}}
-CAFFENET_WEIGHTS = {"content": {"conv1": 1},
+CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
                               "conv3": 0.2,
