@@ -134,7 +134,7 @@ def _compute_style_gradient(F, G_style, layer):
 
     # compute loss and gradient
     if USE_CUDAMAT:
-	Gl = Fl.dot(Fl.T)
+        Gl = Fl.dot(Fl.T)
         El = cm.empty(Gl.shape)
         Gl.subtract(G_style[layer], target=El)
         loss = c/4*El.euclid_norm()**2
@@ -142,7 +142,7 @@ def _compute_style_gradient(F, G_style, layer):
         El.mult(Fl.greater_than(0))
         grad = El.asarray()
     else:
-	Gl = dgemm(1.0,Fl,Fl.T)
+        Gl = dgemm(1.0,Fl,Fl.T)
         El = Gl - G_style[layer]
         loss = c/4 * (El**2).sum()
         grad = c * dgemm(1.0,El,Fl) * (Fl>0)
