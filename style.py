@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/14/2015
+last modified: 09/15/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -29,7 +29,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 TODOs:
   - Expand arguments and options.
-  - Initialize with 'white', 'pink', or 'content'.
+        - Grayscale output flag
+  - Verify model_WEIGHTS is working as expected
+  - Add progress bar for minimize call
 """
 
 # system imports
@@ -87,14 +89,14 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
                                  usage="style.py -s <style_image> -c <content_image>")
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
+parser.add_argument('-g', '--gpu-id', default=-1, type=int, required=False, help="GPU device number")
 parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
-parser.add_argument("-u", "--use-cpu", action="store_true", required=False, help="disable GPU acceleration")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-a", "--scale-output", default=1.0, type=float, required=False, help="output image scale")
+parser.add_argument("-n", "--initialize", default='content', type=str, required=False, help="initialize gradient")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
 parser.add_argument("-o", "--output", default="output/result.jpg", required=False, help="output path")
-parser.add_argument('-g', '--gpu_id', default=-1, type=int, required=False, help="gpu device number")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -127,14 +129,12 @@ def _compute_style_gradient(F, G_style, layer):
 
     # layer variables
     Fl = F[layer]
-
-    # compute loss and gradient
     (nl, ml) = Fl.shape
     c = 1.0/(nl**2*ml**2)
-    Gl = dgemm(1.0,Fl,Fl.T)
 
     # compute loss and gradient
     if USE_CUDAMAT:
+	Gl = Fl.dot(Fl.T)
         El = cm.empty(Gl.shape)
         Gl.subtract(G_style[layer], target=El)
         loss = c/4*El.euclid_norm()**2
@@ -142,9 +142,10 @@ def _compute_style_gradient(F, G_style, layer):
         El.mult(Fl.greater_than(0))
         grad = El.asarray()
     else:
+	Gl = dgemm(1.0,Fl,Fl.T)
         El = Gl - G_style[layer]
         loss = c/4 * (El**2).sum()
-        grad = c * dgemm(1.0,EL,Fl) * (Fl>0)
+        grad = c * dgemm(1.0,El,Fl) * (Fl>0)
 
     return loss, grad
 
@@ -156,7 +157,12 @@ def _compute_activations(net, layers, data):
     # copy activations to output from forward pass
     F = {}
     net.blobs["data"].data[0] = data
+
+    #start = timeit.default_timer()
     net.forward(end=net.params.keys()[-1])
+    #end = timeit.default_timer()
+    #print("Single iteration took {0:.4f} seconds".format(end-start))
+
     for layer in layers:
         Fl = net.blobs[layer].data[0].copy()
 
@@ -297,7 +303,7 @@ class StyleTransfer(object):
         imsave(path, img)
     
 
-    def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, debug=False):
+    def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, initialize='content', debug=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -307,21 +313,42 @@ class StyleTransfer(object):
             :param numpy.ndarray img_content:
                 A content image in 8-bit, RGB format.
         """
-
         # compute style representations
         style_layers = self.weights["style"].keys()
         style_data = self.transformer.preprocess("data", img_style)
         F_style = _compute_activations(self.net, style_layers, style_data)
-        G_style = {l: dgemm(1.0,F_style[l],F_style[l].T) for l in F_style}
+        if USE_CUDAMAT:
+	    G_style = {l: F_style[l].dot(F_style[l].T) for l in F_style}
+        else:
+            G_style = {l: dgemm(1.0,F_style[l],F_style[l].T) for l in F_style}
 
         # compute content representations
         content_layers = self.weights["content"].keys()
         content_data = self.transformer.preprocess("data", img_content)
         F_content = _compute_activations(self.net, content_layers, content_data)
 
-        # initialize input with content image
-        # from kaishengtai/neuralart
-        img0 = self.transformer.preprocess("data", img_content)
+        if initialize == "white":
+            DIM = np.transpose(self.net.blobs["data"].data,(0,2,3,1)).shape[1:]
+            img_white = np.random.uniform(low=0.0, high=1.0, size=DIM)
+            img0 = self.transformer.preprocess("data", img_white)
+        elif initialize == "pink":
+            DIM = self.net.blobs["data"].data.shape[1:]
+            m0 = np.concatenate((np.linspace(0,np.int(np.floor(DIM[0]/2.0)),np.ceil(DIM[0]/2.0)),
+                np.linspace(-np.int(np.ceil(DIM[0]/2.0))+1,-1,np.floor(DIM[0]/2.0))))/DIM[0]
+            m1 = np.concatenate((np.linspace(0,np.int(np.floor(DIM[1]/2.0)),np.ceil(DIM[1]/2.0)),
+                np.linspace(-np.int(np.ceil(DIM[1]/2.0))+1,-1,np.floor(DIM[1]/2.0))))/DIM[1]
+            m2 = np.concatenate((np.linspace(0,np.int(np.floor(DIM[2]/2.0)),np.ceil(DIM[2]/2.0)),
+                np.linspace(-np.int(np.ceil(DIM[2]/2.0))+1,-1,np.floor(DIM[2]/2.0))))/DIM[2]
+            X,Y,Z = np.meshgrid(m0,m1,m2,indexing='ij')
+            with np.errstate(divide='ignore'): #ignore divide by 0 warning
+                Sf = np.power(X**2+Y**2+Z**2,-1/2)
+            Sf[Sf == np.inf] = 0
+            phi = np.random.random(DIM)
+            img_pink = np.fft.ifftn(Sf * (np.cos(2*np.pi*phi) + 1j*np.sin(2*np.pi*phi))).real
+            img_pink = (img_pink - np.min(img_pink)) / (np.max(img_pink) - np.min(img_pink))
+            img0 = self.transformer.preprocess("data",np.transpose(img_pink,(1,2,0)))
+        else: # default is to initialize input with content image
+            img0 = content_data # from kaishengtai/neuralart
 
         # compute data bounds
         pixel_min = -self.transformer.mean["data"][:,0,0]
@@ -366,6 +393,7 @@ if __name__ == "__main__":
                                 img_content, 
                                 ratio=np.float(args.ratio),
                                 n_iter=args.max_iters,
+                                initialize=args.initialize,
                                 debug=args.debug)
     end = timeit.default_timer()
     print("Ran {0} iterations".format(n_iters))
@@ -374,6 +402,6 @@ if __name__ == "__main__":
     # DONE!
     st.save_generated(args.output)
 
-    # shutdown cudamat
-    if USE_CUDAMAT:
-        cm.cublas_shutdown()
+    ## shutdown cudamat - segfaults?
+    #if USE_CUDAMAT:
+    #    cm.cublas_shutdown()
