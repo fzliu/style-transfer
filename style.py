@@ -2,8 +2,9 @@
 style.py - An implementation of "A Neural Algorithm of Artistic Style"
 by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
-author: Frank Liu - frank@frankzliu.com
-last modified: 09/09/2015
+authors: Frank Liu - frank@frankzliu.com
+         Dylan Paiton - dpaiton@gmail.com
+last modified: 09/14/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -27,9 +28,8 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 TODOs:
-  - Move matrix operations to GPU (numba?).
   - Expand arguments and options.
-  - Initialize with 'white', 'pink', or 'content'
+  - Initialize with 'white', 'pink', or 'content'.
 """
 
 # system imports
@@ -45,6 +45,14 @@ from scipy.optimize import minimize
 from scipy.linalg.blas import dgemm
 from skimage.io import imsave
 
+# cudamat
+try:
+    import cudamat as cm
+    cm.cublas_init()
+    USE_CUDAMAT = True
+except:
+    USE_CUDAMAT = False
+
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
 MODEL_DIR = "models"
@@ -56,7 +64,8 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"conv1/7x7_s2": 1},
+GOOGLENET_WEIGHTS = {"content": {"inception_3a/1x1": 0.5,
+                                 "inception_3b/1x1": 0.5},
                      "style": {"conv1/7x7_s2": 0.125,
                                "conv2/3x3": 0.125,
                                "inception_3a/1x1": 0.125,
@@ -75,13 +84,14 @@ CAFFENET_WEIGHTS = {"content": {"conv3": 1},
 
 # argparse
 parser = argparse.ArgumentParser(description="Transfer the style of one image to another.",
-                                 usage="style.py -s <style_image> -c <content_image> <new_height>")
+                                 usage="style.py -s <style_image> -c <content_image>")
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
-parser.add_argument("-r", "--ratio", default="1.25e6", type=str, required=False, help="style-to-content ratio")
+parser.add_argument("-u", "--use-cpu", action="store_true", required=False, help="disable GPU acceleration")
+parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
-parser.add_argument("-a", "--scale-output", default=1, type=float, required=False, help="output img scale")
+parser.add_argument("-a", "--scale-output", default=1.0, type=float, required=False, help="output image scale")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
 parser.add_argument("-o", "--output", default="output/result.jpg", required=False, help="output path")
 parser.add_argument('-g', '--gpu_id', default=-1, type=int, required=False, help="gpu device number")
@@ -92,11 +102,20 @@ def _compute_content_gradient(F, F_content, layer):
         Computes content gradient from activation features.
     """
 
-    # compute loss and gradient
+    # layer variables
     Fl = F[layer]
-    Fl_delta = Fl-F_content[layer]
-    loss = np.sum(Fl_delta**2)/2
-    grad = Fl_delta# * (Fl>0)
+
+    # compute loss and gradient
+    if USE_CUDAMAT:
+        El = cm.empty(Fl.shape)
+        Fl.subtract(F_content[layer], target=El)
+        loss = El.euclid_norm()**2/2
+        El.mult(Fl.greater_than(0))
+        grad = El.asarray()
+    else:
+        El = Fl - F_content[layer]
+        loss = (El**2).sum()/2
+        grad = El * (Fl>0)
 
     return loss, grad
 
@@ -106,16 +125,26 @@ def _compute_style_gradient(F, G_style, layer):
         Computes style gradient from activation features.
     """
 
-    # compute Gram matrix
+    # layer variables
     Fl = F[layer]
-    Gl = dgemm(1.0,Fl,Fl.T)
 
     # compute loss and gradient
     (nl, ml) = Fl.shape
     c = 1.0/(nl**2*ml**2)
-    Gl_delta = Gl - G_style[layer]
-    loss = c/4*np.sum(Gl_delta**2)
-    grad = c*dgemm(1.0,Gl_delta,Fl)# * (Fl>0)
+    Gl = dgemm(1.0,Fl,Fl.T)
+
+    # compute loss and gradient
+    if USE_CUDAMAT:
+        El = cm.empty(Gl.shape)
+        Gl.subtract(G_style[layer], target=El)
+        loss = c/4*El.euclid_norm()**2
+        El = cm.dot(El, Fl, alpha=c)
+        El.mult(Fl.greater_than(0))
+        grad = El.asarray()
+    else:
+        El = Gl - G_style[layer]
+        loss = c/4 * (El**2).sum()
+        grad = c * dgemm(1.0,EL,Fl) * (Fl>0)
 
     return loss, grad
 
@@ -133,6 +162,8 @@ def _compute_activations(net, layers, data):
 
         # flatten filters before adding to output
         Fl = Fl.reshape(Fl.shape[0], -1)
+        if USE_CUDAMAT:
+            Fl = cm.CUDAMatrix(Fl, copy_on_host=False)
         F.update({layer: Fl})
 
     return F
@@ -193,6 +224,9 @@ class StyleTransfer(object):
 
             :param str model_name:
                 Model to use.
+
+            :param tuple model_dim:
+                Model input dimensions.
         """
 
         base_path = os.path.join(MODEL_DIR, model_name)
@@ -232,7 +266,7 @@ class StyleTransfer(object):
 
         # load net
         net = caffe.Net(model_file, pretrained_file, caffe.TEST)
-        net.blobs["data"].reshape(1, model_dim[2], model_dim[0], model_dim[1])
+        net.blobs["data"].reshape(1, model_dim[2], *model_dim[0:2])
 
         # all models used are trained on imagenet data
         mean_path = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
@@ -251,8 +285,10 @@ class StyleTransfer(object):
         """
             Displays the generated image (net input).
         """
-	if os.path.dirname(path): # if dir to output was included
-	    if not os.path.exists(os.path.dirname(path)): # if dir does not exist
+
+        # check output directory
+        if os.path.dirname(path):
+            if not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
 
         # prettify the generated image and save it
@@ -285,20 +321,19 @@ class StyleTransfer(object):
 
         # initialize input with content image
         # from kaishengtai/neuralart
-        data = self.transformer.preprocess("data", img_content)
-        self.net_in.data[0] = data
+        img0 = self.transformer.preprocess("data", img_content)
 
         # compute data bounds
         pixel_min = -self.transformer.mean["data"][:,0,0]
         pixel_max = pixel_min+self.transformer.raw_scale["data"]
-        data_bounds = [(pixel_min[0], pixel_max[0])]*(data.size/3) + \
-                      [(pixel_min[1], pixel_max[1])]*(data.size/3) + \
-                      [(pixel_min[2], pixel_max[2])]*(data.size/3)
+        data_bounds = [(pixel_min[0], pixel_max[0])]*(img0.size/3) + \
+                      [(pixel_min[1], pixel_max[1])]*(img0.size/3) + \
+                      [(pixel_min[2], pixel_max[2])]*(img0.size/3)
 
         # perform optimization
         minfn_args = (G_style, F_content, self.net, self.weights, ratio)
         lbfgs_opts = {"maxiter": n_iter, "disp": debug}
-        return minimize(style_optimizer, self.net_in.data.flatten(), 
+        return minimize(style_optimizer, img0.flatten(), 
                         args=minfn_args, method="L-BFGS-B", jac=True,
                         bounds=data_bounds, options=lbfgs_opts).nit
 
@@ -309,20 +344,23 @@ if __name__ == "__main__":
     if args.gpu_id == -1:
         print 'running on cpu'
         caffe.set_mode_cpu()
+        USE_CUDAMAT = False
     else:
         print 'running on gpu %d' % args.gpu_id
         caffe.set_device(args.gpu_id)
         caffe.set_mode_gpu()
 
+    # load images
     img_style = caffe.io.load_image(args.style_img)
     img_content = caffe.io.load_image(args.content_img)
-
-    out_shape = tuple(np.int(x * args.scale_output) for x in img_content.shape[:2]) + img_content.shape[2:]
     
     # artistic style class
+    out_shape = (int(args.scale_output * img_content.shape[0]),
+                 int(args.scale_output * img_content.shape[1]),
+                 img_content.shape[2])
     st = StyleTransfer(args.model, out_shape)
 
-    # style transfer
+    # perform style transfer
     start = timeit.default_timer()
     n_iters = st.transfer_style(img_style, 
                                 img_content, 
@@ -335,3 +373,7 @@ if __name__ == "__main__":
 
     # DONE!
     st.save_generated(args.output)
+
+    # shutdown cudamat
+    if USE_CUDAMAT:
+        cm.cublas_shutdown()
