@@ -10,6 +10,9 @@ Neural net operations are handled by Caffe, while loss minimization and other mi
 
  - Python >= 2.7
  - Caffe == latest
+ - CUDA >= 7.0 (highly recommended)
+
+CUDA will enable GPU-based inference and learning. If you do have CUDA installed, use of the `cudamat` Python package for GPU-based matrix multiplication from within the script is also highly recommended (i.e. not a strict requirement). The code will automatically detect and use `cudamat` if you have it.
 
 ## Download
 
@@ -33,18 +36,28 @@ This will grab the convnet models from the links provided in the [Caffe Model Zo
 bash scripts/download_models.sh <model_name>
 ```
 
-Here, `<model_name>` must be one of `caffenet`, `googlenet`, or `vgg`.
+Here, `<model_name>` must be one of `vgg`, `googlenet`, or `caffenet`.
 
 ## Sample
 
-Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh. All images were released under the Creative Comments license. All results were generated in around two minutes on an NVidia GeForce GT 750M GPU running the GoogleNet model. Each output image was initialized with the content image, 100 BFGS iterations were performed to generate the final result in each case.
+Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, [Nanjing in winter snow, 2008](https://www.flickr.com/photos/emmajg/3199018106) by Emma Gawen, and [Blade Runner's Johannesburg](https://www.flickr.com/photos/andryn2006/19114016482) by Andrew Moore. All images were released under the Creative Comments license. Each output image was initialized with the content image, and 500 BFGS iterations under the VGG model were performed in each instance.
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
+<img src="http://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
 </p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/san_francisco.jpg" width="40%"/>
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_sanfran.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/sanfrancisco.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_sanfrancisco.jpg" width="40%"/>
 </p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/nanjing.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_nanjing.jpg" width="40%"/>
+</p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/johannesburg.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_johannesburg.jpg" width="40%"/>
+</p>
+
+These results can also be found in the `images` folder in the repository root.
 
 More examples coming soon.
