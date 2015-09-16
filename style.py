@@ -307,40 +307,33 @@ class StyleTransfer(object):
         img = (255*img).astype(np.uint8)
         imsave(path, img)
     
-    def initialize_input(self, option):
+    def initialize_input(self, initialize):
         """
             Creates an initial input (generated) image.
         """
 
-        # white noise = uniform random
-        if option == "white":
-            x0 = np.random.uniform(size=self.net.blobs["data"].shape)
-        
-        # pink noise = 1/f**2 normal in frequency domain
-        #@TODO: fix dimension hack, which assumes knowledge of input
-        elif option == "pink":
-            dims = tuple(self.net.blobs["data"].shape[2:]) + \
-                   (self.net.blobs["data"].shape[1], )
-            grid = np.mgrid[0:dims[0], 0:dims[1]]
+        # specify dimensions and create grid in Fourier domain
+        dims = tuple(self.net.blobs["data"].shape[2:]) + \
+               (self.net.blobs["data"].shape[1], )
+        grid = np.mgrid[0:dims[0], 0:dims[1]]
+        beta = int(initialize)
 
-            # create frequency representation for pink noise
-            Sf = (grid[0] - (dims[0]-1)/2.0) ** 2 + \
-                 (grid[1] - (dims[1]-1)/2.0) ** 2
-            Sf[np.where(Sf == 0)] = 1
-            Sf = np.dstack((1/Sf,)*dims[2])
-            Sf += np.random.randn(*dims)
+        # create frequency representation for pink noise
+        Sf = (grid[0] - (dims[0]-1)/2.0) ** 2 + \
+             (grid[1] - (dims[1]-1)/2.0) ** 2
+        Sf[np.where(Sf == 0)] = 1
+        Sf = np.sqrt(Sf)
+        Sf = np.dstack((Sf**beta,)*dims[2])
 
-            # apply ifft to create pink noise and normalize
-            ifft_kernel = np.cos(2*np.pi) + 1j*np.sin(2*np.pi)
-            img_pink = np.abs(ifftn(Sf * np.exp(ifft_kernel)))
-            img_pink -= img_pink.min()
-            img_pink /= img_pink.max()
+        # apply ifft to create pink noise and normalize
+        ifft_kernel = np.cos(2*np.pi*np.random.randn(*dims)) + \
+                      1j*np.sin(2*np.pi*np.random.randn(*dims))
+        img_pink = np.abs(ifftn(Sf * ifft_kernel))
+        img_pink -= img_pink.min()
+        img_pink /= img_pink.max()
 
-            # preprocess the pink noise image
-            x0 = self.transformer.preprocess("data", img_pink)
-
-        else:
-            raise NotImplementedError, "invalid initialization option"
+        # preprocess the pink noise image
+        x0 = self.transformer.preprocess("data", img_pink)
 
         return x0
 
