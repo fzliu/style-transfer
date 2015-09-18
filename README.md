@@ -43,18 +43,18 @@ Here, `<model_name>` must be one of `vgg`, `googlenet`, or `caffenet`.
 Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photography/15377047497) by Anh Dinh, [Nanjing in winter snow, 2008](https://www.flickr.com/photos/emmajg/3199018106) by Emma Gawen, and [Blade Runner's Johannesburg](https://www.flickr.com/photos/andryn2006/19114016482) by Andrew Moore. All images were released under the Creative Comments license. Each output image was initialized with the content image, and 500 BFGS iterations under the VGG model were performed in each instance.
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/starry_night.jpg" width="50%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/style/starry_night.jpg" width="50%"/>
 </p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/sanfrancisco.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/content/sanfrancisco.jpg" width="40%"/>
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_sanfrancisco.jpg" width="40%"/>
 </p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/nanjing.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/content/nanjing.jpg" width="40%"/>
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_nanjing.jpg" width="40%"/>
 </p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/johannesburg.jpg" width="40%"/>
+<img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/content/johannesburg.jpg" width="40%"/>
 <img src="https://raw.githubusercontent.com/fzliu/style-transfer/master/images/results/starry_johannesburg.jpg" width="40%"/>
 </p>
 
