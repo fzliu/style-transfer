@@ -389,7 +389,6 @@ class StyleTransfer(object):
                       [(pixel_min[1], pixel_max[1])]*(net_in.size/3) + \
                       [(pixel_min[2], pixel_max[2])]*(net_in.size/3)
 
-
         # perform optimization
         minfn_args = (G_style, F_content, self.net, self.weights, ratio)
         lbfgs_opts = {"maxiter": n_iter, "disp": debug}
