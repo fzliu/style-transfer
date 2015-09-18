@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/15/2015
+last modified: 09/18/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -92,7 +92,7 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
+parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-a", "--scale-output", default=1.0, type=float, required=False, help="output image scale")
