@@ -49,6 +49,14 @@ from scipy.linalg.blas import sgemm
 from scipy.misc import imsave
 from scipy.optimize import minimize
 
+try:
+    import progressbar as pb
+    gradIter = 0
+    pbar = pb.ProgressBar()
+    USE_PROGRESSBAR = True
+except:
+    USE_PROGRESSBAR = False 
+
 # cudamat
 try:
     import cudamat as cm
@@ -162,7 +170,7 @@ def _compute_representation(net, layers, data, do_gram=False):
     #start = timeit.default_timer()
     net.forward(end=net.params.keys()[-1])
     #end = timeit.default_timer()
-    #print("Single iteration took {0:.4f} seconds".format(end-start))
+    #print("Single forward pass took {0:.4f} seconds".format(end-start))
 
     for layer in layers:
         rep = net.blobs[layer].data[0].copy()
@@ -224,6 +232,15 @@ def style_optimizer(x, G_style, F_content, net, weights, ratio):
     grad = grad.flatten().astype(np.float64)
 
     return loss, grad
+
+def progress_callback(Xi):
+    global gradIter
+    global pbar
+    try:
+        pbar.update(gradIter)
+    except:
+        pbar.finished = True
+    gradIter += 1
 
 class StyleTransfer(object):
     """
@@ -372,12 +389,25 @@ class StyleTransfer(object):
                       [(pixel_min[1], pixel_max[1])]*(net_in.size/3) + \
                       [(pixel_min[2], pixel_max[2])]*(net_in.size/3)
 
+
         # perform optimization
         minfn_args = (G_style, F_content, self.net, self.weights, ratio)
         lbfgs_opts = {"maxiter": n_iter, "disp": debug}
-        return minimize(style_optimizer, net_in.flatten(), 
-                        args=minfn_args, method="L-BFGS-B", jac=True,
-                        bounds=data_bounds, options=lbfgs_opts).nit
+        grad_method = "L-BFGS-B"
+
+        if USE_PROGRESSBAR:
+            global pbar
+            pbar.widgets = ['Progress: ', 
+                pb.Percentage(), ' ', pb.Bar(marker=pb.RotatingMarker()), ' ', pb.ETA()]
+            pbar.maxval = n_iter
+            pbar.start()
+            return minimize(style_optimizer, net_in.flatten(), callback=progress_callback,
+                            args=minfn_args, method=grad_method, jac=True,
+                            bounds=data_bounds, options=lbfgs_opts).nit
+        else:
+            return minimize(style_optimizer, net_in.flatten(), 
+                            args=minfn_args, method=grad_method, jac=True,
+                            bounds=data_bounds, options=lbfgs_opts).nit
 
 
 if __name__ == "__main__":
@@ -402,6 +432,8 @@ if __name__ == "__main__":
                  img_content.shape[2])
     st = StyleTransfer(args.model, out_shape)
 
+    print "Model loaded.\nCreating art takes time..."
+
     # perform style transfer
     start = timeit.default_timer()
     n_iters = st.transfer_style(img_style, 
@@ -411,6 +443,10 @@ if __name__ == "__main__":
                                 initialize=args.initialize,
                                 debug=args.debug)
     end = timeit.default_timer()
+
+    if USE_PROGRESSBAR:
+        pbar.finish()
+
     logging.info("Ran {0} iterations".format(n_iters))
     logging.info("Took {0:.0f} seconds".format(end-start))
 
