@@ -394,7 +394,7 @@ class StyleTransfer(object):
         lbfgs_opts = {"maxiter": n_iter, "disp": debug}
         grad_method = "L-BFGS-B"
 
-        if USE_PROGRESSBAR:
+        if USE_PROGRESSBAR and not debug:
             global pbar
             pbar.widgets = ['Progress: ', 
                 pb.Percentage(), ' ', pb.Bar(marker=pb.RotatingMarker()), ' ', pb.ETA()]
@@ -443,7 +443,7 @@ if __name__ == "__main__":
                                 debug=args.debug)
     end = timeit.default_timer()
 
-    if USE_PROGRESSBAR:
+    if USE_PROGRESSBAR and not args.debug:
         pbar.finish()
 
     logging.info("Ran {0} iterations".format(n_iters))
