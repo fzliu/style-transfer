@@ -98,7 +98,7 @@ parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, 
 parser.add_argument("-a", "--scale-output", default=1.0, type=float, required=False, help="output image scale")
 parser.add_argument("-n", "--initialize", default="content", type=str, required=False, help="initialize gradient")
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
-parser.add_argument("-o", "--output", default="output/result.jpg", required=False, help="output path")
+parser.add_argument("-o", "--output", default="outputs/result.jpg", required=False, help="output path")
 
 
 def _compute_content_gradient(F, F_content, layer):
@@ -170,7 +170,7 @@ def _compute_representation(net, layers, data, do_gram=False):
         # flatten filters before adding to output
         rep = rep.reshape(rep.shape[0], -1)
         if USE_CUDAMAT:
-            rep = cm.CUDAMatrix(Fl, copy_on_host=False)
+            rep = cm.CUDAMatrix(rep, copy_on_host=False)
 
         # compute Gramian, if necessary
         if do_gram:
