@@ -10,7 +10,7 @@ Neural net operations are handled by Caffe, while loss minimization and other mi
 
  - Python >= 2.7
  - Caffe == latest
- - CUDA >= 7.0 (highly recommended)
+ - CUDA >= 6.5 (highly recommended)
 
 CUDA will enable GPU-based inference and learning. If you do have CUDA installed, use of the `cudamat` Python package for GPU-based matrix multiplication from within the script is also highly recommended (i.e. not a strict requirement). The code will automatically detect and use `cudamat` if you have it.
 

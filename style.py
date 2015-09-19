@@ -194,7 +194,7 @@ def style_optimizer(x, G_style, F_content, net, weights, ratio):
     layers = net.params.keys()
     net.blobs[layers[-1]].diff[:] = 0
     F = _compute_representation(net, G_style.keys()+F_content.keys(),
-                                x.reshape(net.blobs["data"].shape[1:]))
+                                x.reshape(net.blobs["data"].data.shape[1:]))
 
     # backprop by layer
     layers.reverse()
@@ -266,6 +266,7 @@ class StyleTransfer(object):
 
         # load model
         self.load_model(model_file, pretrained_file, model_dim)
+        logging.info("model {0} loaded".format(model_name))
         self.weights = weights
 
     def load_model(self, model_file, pretrained_file, model_dim):
@@ -285,7 +286,7 @@ class StyleTransfer(object):
 
         # all models used are trained on imagenet data
         mean_path = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
-        transformer = caffe.io.Transformer({"data": net.blobs["data"].shape})
+        transformer = caffe.io.Transformer({"data": net.blobs["data"].data.shape})
         transformer.set_mean("data", np.load(mean_path).mean(1).mean(1))
         transformer.set_channel_swap("data", (2,1,0))
         transformer.set_transpose("data", (2,0,1))
@@ -316,8 +317,8 @@ class StyleTransfer(object):
         """
 
         # specify dimensions and create grid in Fourier domain
-        dims = tuple(self.net.blobs["data"].shape[2:]) + \
-               (self.net.blobs["data"].shape[1], )
+        dims = tuple(self.net.blobs["data"].datashape[2:]) + \
+               (self.net.blobs["data"].data.shape[1], )
         grid = np.mgrid[0:dims[0], 0:dims[1]]
         beta = int(initialize)
 
@@ -414,8 +415,8 @@ if __name__ == "__main__":
                                 initialize=args.initialize,
                                 debug=args.debug)
     end = timeit.default_timer()
-    logging.info("Ran {0} iterations".format(n_iters))
-    logging.info("Took {0:.0f} seconds".format(end-start))
+    logging.info("ran {0} iterations".format(n_iters))
+    logging.info("took {0:.0f} seconds".format(end-start))
 
     # DONE!
     st.save_generated(args.output)
