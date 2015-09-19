@@ -60,4 +60,4 @@ Original images: [San Francisco](https://www.flickr.com/photos/anhgemus-photogra
 
 These results can also be found in the `images` folder in the repository root.
 
-More examples coming soon.
+A more in-depth set of examples can be found [here](http://frankzliu.com/artistic-style-transfer/).

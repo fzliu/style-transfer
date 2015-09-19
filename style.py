@@ -100,6 +100,9 @@ parser.add_argument("-n", "--initialize", default="content", type=str, required=
 parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
 parser.add_argument("-o", "--output", default="outputs/result.jpg", required=False, help="output path")
 
+# logging
+logging.basicConfig(level=logging.INFO)
+
 
 def _compute_content_gradient(F, F_content, layer):
     """
