@@ -70,14 +70,16 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv5_1": 0.2}}
 GOOGLENET_WEIGHTS = {"content": {"inception_3a/1x1": 0.5,
                                  "inception_3b/1x1": 0.5},
-                     "style": {"conv1/7x7_s2": 0.125,
-                               "conv2/3x3": 0.125,
-                               "inception_3a/1x1": 0.125,
-                               "inception_3b/1x1": 0.125,
-                               "inception_4a/1x1": 0.125,
-                               "inception_4b/1x1": 0.125,
-                               "inception_4c/1x1": 0.125,
-                               "inception_4d/1x1": 0.125}}
+                     "style": {"conv1/7x7_s2": 0.1,
+                               "conv2/3x3": 0.1,
+                               "inception_3a/1x1": 0.1,
+                               "inception_3b/1x1": 0.1,
+                               "inception_4a/1x1": 0.1,
+                               "inception_4b/1x1": 0.1,
+                               "inception_4c/1x1": 0.1,
+                               "inception_4d/1x1": 0.1,
+                               "inception_4e/1x1": 0.1,
+                               "inception_5a/1x1": 0.1}}
 CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
@@ -266,7 +268,7 @@ class StyleTransfer(object):
 
         # load model
         self.load_model(model_file, pretrained_file, model_dim)
-        logging.info("model {0} loaded".format(model_name))
+        logging.info("Loaded model {0}".format(model_name))
         self.weights = weights
 
     def load_model(self, model_file, pretrained_file, model_dim):
@@ -404,7 +406,7 @@ if __name__ == "__main__":
     out_shape = (int(args.scale_output * img_content.shape[0]),
                  int(args.scale_output * img_content.shape[1]),
                  img_content.shape[2])
-    st = StyleTransfer(args.model, out_shape)
+    st = StyleTransfer(args.model.lower(), out_shape)
 
     # perform style transfer
     start = timeit.default_timer()
@@ -415,8 +417,8 @@ if __name__ == "__main__":
                                 initialize=args.initialize,
                                 debug=args.debug)
     end = timeit.default_timer()
-    logging.info("ran {0} iterations".format(n_iters))
-    logging.info("took {0:.0f} seconds".format(end-start))
+    logging.info("Ran {0} iterations".format(n_iters))
+    logging.info("Took {0:.0f} seconds".format(end-start))
 
     # DONE!
     st.save_generated(args.output)
