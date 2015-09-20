@@ -70,14 +70,16 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv5_1": 0.2}}
 GOOGLENET_WEIGHTS = {"content": {"inception_3a/1x1": 0.5,
                                  "inception_3b/1x1": 0.5},
-                     "style": {"conv1/7x7_s2": 0.125,
-                               "conv2/3x3": 0.125,
-                               "inception_3a/1x1": 0.125,
-                               "inception_3b/1x1": 0.125,
-                               "inception_4a/1x1": 0.125,
-                               "inception_4b/1x1": 0.125,
-                               "inception_4c/1x1": 0.125,
-                               "inception_4d/1x1": 0.125}}
+                     "style": {"conv1/7x7_s2": 0.1,
+                               "conv2/3x3": 0.1,
+                               "inception_3a/1x1": 0.1,
+                               "inception_3b/1x1": 0.1,
+                               "inception_4a/1x1": 0.1,
+                               "inception_4b/1x1": 0.1,
+                               "inception_4c/1x1": 0.1,
+                               "inception_4d/1x1": 0.1,
+                               "inception_4e/1x1": 0.1,
+                               "inception_5a/1x1": 0.1}}
 CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
@@ -194,7 +196,7 @@ def style_optimizer(x, G_style, F_content, net, weights, ratio):
     layers = net.params.keys()
     net.blobs[layers[-1]].diff[:] = 0
     F = _compute_representation(net, G_style.keys()+F_content.keys(),
-                                x.reshape(net.blobs["data"].shape[1:]))
+                                x.reshape(net.blobs["data"].data.shape[1:]))
 
     # backprop by layer
     layers.reverse()
@@ -266,6 +268,7 @@ class StyleTransfer(object):
 
         # load model
         self.load_model(model_file, pretrained_file, model_dim)
+        logging.info("Loaded model {0}".format(model_name))
         self.weights = weights
 
     def load_model(self, model_file, pretrained_file, model_dim):
@@ -285,7 +288,7 @@ class StyleTransfer(object):
 
         # all models used are trained on imagenet data
         mean_path = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
-        transformer = caffe.io.Transformer({"data": net.blobs["data"].shape})
+        transformer = caffe.io.Transformer({"data": net.blobs["data"].data.shape})
         transformer.set_mean("data", np.load(mean_path).mean(1).mean(1))
         transformer.set_channel_swap("data", (2,1,0))
         transformer.set_transpose("data", (2,0,1))
@@ -316,8 +319,8 @@ class StyleTransfer(object):
         """
 
         # specify dimensions and create grid in Fourier domain
-        dims = tuple(self.net.blobs["data"].shape[2:]) + \
-               (self.net.blobs["data"].shape[1], )
+        dims = tuple(self.net.blobs["data"].datashape[2:]) + \
+               (self.net.blobs["data"].data.shape[1], )
         grid = np.mgrid[0:dims[0], 0:dims[1]]
         beta = int(initialize)
 
@@ -403,7 +406,7 @@ if __name__ == "__main__":
     out_shape = (int(args.scale_output * img_content.shape[0]),
                  int(args.scale_output * img_content.shape[1]),
                  img_content.shape[2])
-    st = StyleTransfer(args.model, out_shape)
+    st = StyleTransfer(args.model.lower(), out_shape)
 
     # perform style transfer
     start = timeit.default_timer()

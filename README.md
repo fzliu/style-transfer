@@ -9,8 +9,8 @@ Neural net operations are handled by Caffe, while loss minimization and other mi
 ## Requirements
 
  - Python >= 2.7
- - Caffe == latest
- - CUDA >= 7.0 (highly recommended)
+ - CUDA >= 6.5 (highly recommended)
+ - Caffe
 
 CUDA will enable GPU-based inference and learning. If you do have CUDA installed, use of the `cudamat` Python package for GPU-based matrix multiplication from within the script is also highly recommended (i.e. not a strict requirement). The code will automatically detect and use `cudamat` if you have it.
 
@@ -21,7 +21,7 @@ To run the code, you must have Caffe installed and the appropriate Python bindin
 All of the necessary code is contained in the file `style.py`. You can try it on your own style and content image by running the following command:
 
 ```
-python style.py -s <style_image> -c <content_image> -m <model_name>
+python style.py -s <style_image> -c <content_image> -m <model_name> -g 0
 ```
 
 The protobufs which come with the vanilla Caffe install aren't quite compatible with this code - working ones have already been added to this repository as a result of this. To get the pretrained models, simply run:
