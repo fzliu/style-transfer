@@ -1,3 +1,6 @@
 *.caffemodel
 output/*
 test/*
+images/results/*
+.DS_Store
+iterate.dat
