@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/22/2015
+last modified: 09/23/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -48,20 +48,12 @@ from scipy.misc import imsave
 from scipy.optimize import minimize
 from skimage.transform import rescale
 
-# cudamat
-try:
-    import cudamat as cm
-    cm.cublas_init(max_ones=1024*1024)
-    USE_CUDAMAT = False
-except:
-    USE_CUDAMAT = False
-
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
 MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
 MODEL_DIR = "models"
 
-# style scale
+# constants
 INF = np.float32(np.inf)
 STYLE_SCALE = 0.5
 
@@ -113,22 +105,12 @@ def _compute_style_grad(F, G, G_style, layer):
         Computes style gradient and loss from activation features.
     """
 
-    # layer variables
+    # compute loss and gradient
     (Fl, Gl) = (F[layer], G[layer])
     c = Fl.shape[0]**-2 * Fl.shape[1]**-2
-
-    # compute loss and gradient
-    if USE_CUDAMAT:
-        El = cm.empty(Gl.shape)
-        Gl.subtract(G_style[layer], target=El)
-        loss = c/4 * El.euclid_norm()**2
-        El = cm.dot(El, Fl, alpha=c)
-        El.mult(Fl.greater_than(0))
-        grad = El.asarray()
-    else:
-        El = Gl - G_style[layer]
-        loss = c/4 * (El**2).sum()
-        grad = c * sgemm(1.0, El, Fl) * (Fl>0)
+    El = Gl - G_style[layer]
+    loss = c/4 * (El**2).sum()
+    grad = c * sgemm(1.0, El, Fl) * (Fl>0)
 
     return loss, grad
 
@@ -137,20 +119,11 @@ def _compute_content_grad(F, F_content, layer):
         Computes content gradient and loss from activation features.
     """
 
-    # layer variables
-    Fl = F[layer]
-
     # compute loss and gradient
-    if USE_CUDAMAT:
-        El = cm.empty(Fl.shape)
-        Fl.subtract(F_content[layer], target=El)
-        loss = El.euclid_norm()**2 / 2
-        El.mult(Fl.greater_than(0))
-        grad = El.asarray()
-    else:
-        El = Fl - F_content[layer]
-        loss = (El**2).sum() / 2
-        grad = El * (Fl>0)
+    Fl = F[layer]
+    El = Fl - F_content[layer]
+    loss = (El**2).sum() / 2
+    grad = El * (Fl>0)
 
     return loss, grad
 
@@ -167,22 +140,10 @@ def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
     # loop through combined set of layers
     for layer in set(layers_style)|set(layers_content):
         F = net.blobs[layer].data[0].copy()
-
-        # flatten filters before adding to output
         F.shape = (F.shape[0], -1)
-        if USE_CUDAMAT:
-            F = cm.CUDAMatrix(F, copy_on_host=False)
         repr_c[layer] = F
-
-        # style representation
         if layer in layers_style:
-            if USE_CUDAMAT:
-                G = F.dot(F.T)
-                if scale_gram != 1:
-                    G.mult(scale_gram)
-            else:
-                G = sgemm(scale_gram, F, F.T)
-            repr_s[layer] = G
+            repr_s[layer] = sgemm(scale_gram, F, F.T)
 
     return repr_s, repr_c
 
@@ -193,8 +154,8 @@ def style_optfn(x, net, weights, G_style, F_content, ratio):
 
     # initialize update params
     layers_all = net.params.keys()[::-1]
-    layers_style = weights["style"]
-    layers_content = weights["content"]
+    layers_style = weights["style"].keys()
+    layers_content = weights["content"].keys()
     net_in = x.reshape(net.blobs["data"].data.shape[1:])
     (G, F) = _compute_reprs(net, layers_style, layers_content, net_in)
 
@@ -423,12 +384,10 @@ if __name__ == "__main__":
     # set GPU/CPU mode
     if args.gpu_id == -1:
         caffe.set_mode_cpu()
-        USE_CUDAMAT = False
-        logging.info("Running on CPU.")
+        logging.info("Running net on CPU.")
     else:
         caffe.set_device(args.gpu_id)
-        caffe.set_mode_gpu()
-        logging.info("Running on GPU {0}.".format(args.gpu_id))
+        logging.info("Running net on GPU {0}.".format(args.gpu_id))
 
     # load images
     img_style = caffe.io.load_image(args.style_img)
@@ -450,7 +409,3 @@ if __name__ == "__main__":
     # DONE!
     st.save_generated(args.output)
     logging.info("Output saved to {0}.".format(args.output))
-
-    # shutdown cudamat - segfaults?
-    if USE_CUDAMAT:
-        cm.cublas_shutdown()
