@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/18/2015
+last modified: 09/22/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -28,8 +28,6 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 TODOs:
-  - Expand arguments and options.
-        - Grayscale output flag
   - Verify model_WEIGHTS is working as expected
   - Add progress bar for minimize call
 """
@@ -48,18 +46,24 @@ from scipy.fftpack import ifftn
 from scipy.linalg.blas import sgemm
 from scipy.misc import imsave
 from scipy.optimize import minimize
+from skimage.transform import rescale
 
 # cudamat
 try:
     import cudamat as cm
-    cm.cublas_init()
-    USE_CUDAMAT = True
+    cm.cublas_init(max_ones=1024*1024)
+    USE_CUDAMAT = False
 except:
     USE_CUDAMAT = False
 
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
+MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
 MODEL_DIR = "models"
+
+# style scale
+INF = np.float32(np.inf)
+STYLE_SCALE = 0.5
 
 # weights for the individual models
 VGG_WEIGHTS = {"content": {"conv4_2": 1},
@@ -68,18 +72,19 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3a/1x1": 0.5,
-                                 "inception_3b/1x1": 0.5},
+GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.005,
+                                 "inception_3a/output": 0.995},
                      "style": {"conv1/7x7_s2": 0.1,
-                               "conv2/3x3": 0.1,
-                               "inception_3a/1x1": 0.1,
-                               "inception_3b/1x1": 0.1,
-                               "inception_4a/1x1": 0.1,
-                               "inception_4b/1x1": 0.1,
-                               "inception_4c/1x1": 0.1,
-                               "inception_4d/1x1": 0.1,
-                               "inception_4e/1x1": 0.1,
-                               "inception_5a/1x1": 0.1}}
+                               "conv2/3x3": 0.09,
+                               "inception_3a/output": 0.09,
+                               "inception_3b/output": 0.09,
+                               "inception_4a/output": 0.09,
+                               "inception_4b/output": 0.09,
+                               "inception_4c/output": 0.09,
+                               "inception_4d/output": 0.09,
+                               "inception_4e/output": 0.09,
+                               "inception_5a/output": 0.09,
+                               "inception_5b/output": 0.09,}}
 CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
@@ -95,20 +100,41 @@ parser.add_argument("-s", "--style-img", type=str, required=True, help="input st
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
 parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
+parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
-parser.add_argument("-i", "--max-iters", default=500, type=int, required=False, help="L-BFGS iterations")
-parser.add_argument("-a", "--scale-output", default=1.0, type=float, required=False, help="output image scale")
-parser.add_argument("-n", "--initialize", default="content", type=str, required=False, help="initialize gradient")
-parser.add_argument("-d", "--debug", action="store_true", required=False, help="run in debug mode")
+parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
+parser.add_argument("-l", "--length", default=640, type=float, required=False, help="maximum image length")
+parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
 parser.add_argument("-o", "--output", default="outputs/result.jpg", required=False, help="output path")
 
-# logging
-logging.basicConfig(level=logging.INFO)
 
-
-def _compute_content_gradient(F, F_content, layer):
+def _compute_style_grad(F, G, G_style, layer):
     """
-        Computes content gradient from activation features.
+        Computes style gradient and loss from activation features.
+    """
+
+    # layer variables
+    (Fl, Gl) = (F[layer], G[layer])
+    c = Fl.shape[0]**-2 * Fl.shape[1]**-2
+
+    # compute loss and gradient
+    if USE_CUDAMAT:
+        El = cm.empty(Gl.shape)
+        Gl.subtract(G_style[layer], target=El)
+        loss = c/4 * El.euclid_norm()**2
+        El = cm.dot(El, Fl, alpha=c)
+        El.mult(Fl.greater_than(0))
+        grad = El.asarray()
+    else:
+        El = Gl - G_style[layer]
+        loss = c/4 * (El**2).sum()
+        grad = c * sgemm(1.0, El, Fl) * (Fl>0)
+
+    return loss, grad
+
+def _compute_content_grad(F, F_content, layer):
+    """
+        Computes content gradient and loss from activation features.
     """
 
     # layer variables
@@ -128,95 +154,70 @@ def _compute_content_gradient(F, F_content, layer):
 
     return loss, grad
 
-def _compute_style_gradient(F, G_style, layer):
-    """
-        Computes style gradient from activation features.
-    """
-
-    # layer variables
-    Fl = F[layer]
-    (nl, ml) = Fl.shape
-    c = nl**-2 * ml**-2
-
-    # compute loss and gradient
-    if USE_CUDAMAT:
-        Gl = Fl.dot(Fl.T)
-        El = cm.empty(Gl.shape)
-        Gl.subtract(G_style[layer], target=El)
-        loss = c/4 * El.euclid_norm()**2
-        El = cm.dot(El, Fl, alpha=c)
-        El.mult(Fl.greater_than(0))
-        grad = El.asarray()
-    else:
-        Gl = sgemm(1.0, Fl, Fl.T)
-        El = Gl - G_style[layer]
-        loss = c/4 * (El**2).sum()
-        grad = c * sgemm(1.0, El, Fl) * (Fl>0)
-
-    return loss, grad
-
-def _compute_representation(net, layers, data, do_gram=False):
+def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
     """
         Computes representation matrices for an image.
     """
 
     # copy activations to output from forward pass
-    rep_mats = {}
-    net.blobs["data"].data[0] = data
-
-    #start = timeit.default_timer()
+    (repr_s, repr_c) = ({}, {})
+    net.blobs["data"].data[0] = net_in
     net.forward(end=net.params.keys()[-1])
-    #end = timeit.default_timer()
-    #print("Single iteration took {0:.4f} seconds".format(end-start))
 
-    for layer in layers:
-        rep = net.blobs[layer].data[0].copy()
+    # loop through combined set of layers
+    for layer in set(layers_style)|set(layers_content):
+        F = net.blobs[layer].data[0].copy()
 
         # flatten filters before adding to output
-        rep = rep.reshape(rep.shape[0], -1)
+        F.shape = (F.shape[0], -1)
         if USE_CUDAMAT:
-            rep = cm.CUDAMatrix(rep, copy_on_host=False)
+            F = cm.CUDAMatrix(F, copy_on_host=False)
+        repr_c[layer] = F
 
-        # compute Gramian, if necessary
-        if do_gram:
-            rep = rep.dot(rep.T) if USE_CUDAMAT else sgemm(1.0, rep, rep.T)
-        
-        # update complete representation set
-        rep_mats.update({layer: rep})
+        # style representation
+        if layer in layers_style:
+            if USE_CUDAMAT:
+                G = F.dot(F.T)
+                if scale_gram != 1:
+                    G.mult(scale_gram)
+            else:
+                G = sgemm(scale_gram, F, F.T)
+            repr_s[layer] = G
 
-    return rep_mats
+    return repr_s, repr_c
 
-def style_optimizer(x, G_style, F_content, net, weights, ratio):
+def style_optfn(x, net, weights, G_style, F_content, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
     """
 
     # initialize update params
-    loss = 0
-    layers = net.params.keys()
-    net.blobs[layers[-1]].diff[:] = 0
-    F = _compute_representation(net, G_style.keys()+F_content.keys(),
-                                x.reshape(net.blobs["data"].data.shape[1:]))
+    layers_all = net.params.keys()[::-1]
+    layers_style = weights["style"]
+    layers_content = weights["content"]
+    net_in = x.reshape(net.blobs["data"].data.shape[1:])
+    (G, F) = _compute_reprs(net, layers_style, layers_content, net_in)
 
     # backprop by layer
-    layers.reverse()
-    for i, layer in enumerate(layers):
-        next_layer = None if i == len(layers)-1 else layers[i+1]
+    loss = 0
+    net.blobs[layers_all[-1]].diff[:] = 0
+    for i, layer in enumerate(layers_all):
+        next_layer = None if i == len(layers_all)-1 else layers_all[i+1]
         grad = net.blobs[layer].diff[0]
 
-        # content contribution
-        if layer in weights["content"]:
-            wl = weights["content"][layer]
-            (l, g) = _compute_content_gradient(F, F_content, layer)
-            loss += wl * l
-            grad += wl * g.reshape(grad.shape)
-
         # style contribution
-        if layer in weights["style"]:
+        if layer in layers_style:
             wl = weights["style"][layer]
-            (l, g) = _compute_style_gradient(F, G_style, layer)
+            (l, g) = _compute_style_grad(F, G, G_style, layer)
             loss += ratio * wl * l
             grad += ratio * wl * g.reshape(grad.shape)
+
+        # content contribution
+        if layer in layers_content:
+            wl = weights["content"][layer]
+            (l, g) = _compute_content_grad(F, F_content, layer)
+            loss += wl * l
+            grad += wl * g.reshape(grad.shape)
 
         # compute gradient
         net.backward(start=layer, end=next_layer)
@@ -235,15 +236,15 @@ class StyleTransfer(object):
         Style transfer class.
     """
 
-    def __init__(self, model_name, model_dim):
+    def __init__(self, model_name):
         """
             Initialize the model used for style transfer.
 
             :param str model_name:
                 Model to use.
 
-            :param tuple model_dim:
-                Model input dimensions.
+            :param tuple scale_output:
+                Output scale to use.
         """
 
         base_path = os.path.join(MODEL_DIR, model_name)
@@ -266,12 +267,12 @@ class StyleTransfer(object):
             pretrained_file = os.path.join(base_path, "bvlc_reference_caffenet.caffemodel")
             weights = CAFFENET_WEIGHTS
 
-        # load model
-        self.load_model(model_file, pretrained_file, model_dim)
-        logging.info("Loaded model {0}".format(model_name))
-        self.weights = weights
+        # load model and scale factors
+        self.load_model(model_file, pretrained_file)
+        self.weights = weights.copy()
 
-    def load_model(self, model_file, pretrained_file, model_dim):
+
+    def load_model(self, model_file, pretrained_file):
         """
             Loads specified model from caffe install (see caffe docs).
 
@@ -282,14 +283,17 @@ class StyleTransfer(object):
                 Path to pretrained caffe model.
         """
 
-        # load net
+        # load net (supressing output)
+        out_orig = os.dup(2)
+        null_fds = os.open(os.devnull, os.O_RDWR)
+        os.dup2(null_fds, 2)
         net = caffe.Net(model_file, pretrained_file, caffe.TEST)
-        net.blobs["data"].reshape(1, model_dim[2], *model_dim[0:2])
+        os.dup2(out_orig, 2)
+        os.close(null_fds)
 
         # all models used are trained on imagenet data
-        mean_path = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
         transformer = caffe.io.Transformer({"data": net.blobs["data"].data.shape})
-        transformer.set_mean("data", np.load(mean_path).mean(1).mean(1))
+        transformer.set_mean("data", np.load(MEAN_PATH).mean(1).mean(1))
         transformer.set_channel_swap("data", (2,1,0))
         transformer.set_transpose("data", (2,0,1))
         transformer.set_raw_scale("data", 255)
@@ -300,7 +304,10 @@ class StyleTransfer(object):
 
     def save_generated(self, path):
         """
-            Displays the generated image (net input).
+            Saves the generated image (net input, after optimization).
+
+            :param str path:
+                Output path.
         """
 
         # check output directory
@@ -313,37 +320,46 @@ class StyleTransfer(object):
         img = (255*img).astype(np.uint8)
         imsave(path, img)
     
-    def initialize_input(self, initialize):
+    def _rescale_net(self, img):
+        """
+            Rescales the network to fit a particular image.
+        """
+
+        new_dims = (1, img.shape[2]) + img.shape[:2]
+        self.net.blobs["data"].reshape(*new_dims)
+        self.transformer.inputs["data"] = new_dims
+
+    def _make_noise_input(self, init):
         """
             Creates an initial input (generated) image.
         """
 
         # specify dimensions and create grid in Fourier domain
-        dims = tuple(self.net.blobs["data"].datashape[2:]) + \
+        dims = tuple(self.net.blobs["data"].data.shape[2:]) + \
                (self.net.blobs["data"].data.shape[1], )
         grid = np.mgrid[0:dims[0], 0:dims[1]]
-        beta = int(initialize)
 
         # create frequency representation for pink noise
         Sf = (grid[0] - (dims[0]-1)/2.0) ** 2 + \
              (grid[1] - (dims[1]-1)/2.0) ** 2
         Sf[np.where(Sf == 0)] = 1
         Sf = np.sqrt(Sf)
-        Sf = np.dstack((Sf**beta,)*dims[2])
+        Sf = np.dstack((Sf**int(init),)*dims[2])
 
         # apply ifft to create pink noise and normalize
         ifft_kernel = np.cos(2*np.pi*np.random.randn(*dims)) + \
                       1j*np.sin(2*np.pi*np.random.randn(*dims))
-        img_pink = np.abs(ifftn(Sf * ifft_kernel))
-        img_pink -= img_pink.min()
-        img_pink /= img_pink.max()
+        img_noise = np.abs(ifftn(Sf * ifft_kernel))
+        img_noise -= img_noise.min()
+        img_noise /= img_noise.max()
 
         # preprocess the pink noise image
-        x0 = self.transformer.preprocess("data", img_pink)
+        x0 = self.transformer.preprocess("data", img_noise)
 
         return x0
 
-    def transfer_style(self, img_style, img_content, ratio=1e3, n_iter=500, initialize=None, debug=False):
+    def transfer_style(self, img_style, img_content, length=640,
+                       ratio=1e5, n_iter=500, init=None, verbose=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -354,75 +370,87 @@ class StyleTransfer(object):
                 A content image in 8-bit, RGB format.
         """
 
+        # rescale the images
+        scale = length / float(max(img_style.shape[:2]))
+        img_style = rescale(img_style, STYLE_SCALE*scale, order=3)
+        scale = length / float(max(img_content.shape[:2]))
+        img_content = rescale(img_content, scale, order=3)
+
         # compute style representations
-        style_layers = self.weights["style"].keys()
-        style_data = self.transformer.preprocess("data", img_style)
-        G_style = _compute_representation(self.net, style_layers, style_data, do_gram=True)
+        self._rescale_net(img_style)
+        layers = self.weights["style"].keys()
+        net_in = self.transformer.preprocess("data", img_style)
+        scale_gram = float(img_content.size)/img_style.size
+        (G_style, _) = _compute_reprs(self.net, layers, [], net_in,
+                                      scale_gram=scale_gram)
 
         # compute content representations
-        content_layers = self.weights["content"].keys()
-        content_data = self.transformer.preprocess("data", img_content)
-        F_content = _compute_representation(self.net, content_layers, content_data)
+        self._rescale_net(img_content)
+        layers = self.weights["content"].keys()
+        net_in = self.transformer.preprocess("data", img_content)
+        (_, F_content) = _compute_reprs(self.net, [], layers, net_in)
 
         # generate initial net input
         # default = content image, see kaishengtai/neuralart
-        if initialize == "content":
-            net_in = content_data
+        if init == "content":
+            img0 = self.transformer.preprocess("data", img_content)
         else:
-            net_in = self.initialize_input(initialize)
+            img0 = self._make_noise_input(init)
 
         # compute data bounds
-        pixel_min = -self.transformer.mean["data"][:,0,0]
-        pixel_max = pixel_min + self.transformer.raw_scale["data"]
-        data_bounds = [(pixel_min[0], pixel_max[0])]*(net_in.size/3) + \
-                      [(pixel_min[1], pixel_max[1])]*(net_in.size/3) + \
-                      [(pixel_min[2], pixel_max[2])]*(net_in.size/3)
+        data_min = -self.transformer.mean["data"][:,0,0]
+        data_max = data_min + self.transformer.raw_scale["data"]
+        data_bounds = [(data_min[0], data_max[0])]*(img0.size/3) + \
+                      [(data_min[1], data_max[1])]*(img0.size/3) + \
+                      [(data_min[2], data_max[2])]*(img0.size/3)
 
         # perform optimization
-        minfn_args = (G_style, F_content, self.net, self.weights, ratio)
-        lbfgs_opts = {"maxiter": n_iter, "disp": debug}
-        return minimize(style_optimizer, net_in.flatten(), 
-                        args=minfn_args, method="L-BFGS-B", jac=True,
-                        bounds=data_bounds, options=lbfgs_opts).nit
+        minfn_args = (self.net, self.weights, G_style, F_content, ratio)
+        return minimize(style_optfn, img0.flatten(), args=minfn_args, 
+                        method="L-BFGS-B", jac=True, bounds=data_bounds, 
+                        options={"maxiter": n_iter, "disp": verbose}).nit
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
+    # logging
+    format = "%(filename)s:%(lineno)d  %(asctime)s -- %(message)s"
+    level = logging.INFO if args.verbose else logging.WARNING
+    logging.basicConfig(format=format, level=level)
+    logging.info("Starting style transfer.")
+
+    # set GPU/CPU mode
     if args.gpu_id == -1:
-        logging.info("Running on CPU")
         caffe.set_mode_cpu()
         USE_CUDAMAT = False
+        logging.info("Running on CPU.")
     else:
-        logging.info("Running on GPU {0}".format(args.gpu_id))
         caffe.set_device(args.gpu_id)
         caffe.set_mode_gpu()
+        logging.info("Running on GPU {0}.".format(args.gpu_id))
 
     # load images
     img_style = caffe.io.load_image(args.style_img)
     img_content = caffe.io.load_image(args.content_img)
+    logging.info("Successfully loaded images.")
     
     # artistic style class
-    out_shape = (int(args.scale_output * img_content.shape[0]),
-                 int(args.scale_output * img_content.shape[1]),
-                 img_content.shape[2])
-    st = StyleTransfer(args.model.lower(), out_shape)
+    st = StyleTransfer(args.model.lower())
+    logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
     start = timeit.default_timer()
-    n_iters = st.transfer_style(img_style, 
-                                img_content, 
-                                ratio=np.float(args.ratio),
-                                n_iter=args.max_iters,
-                                initialize=args.initialize,
-                                debug=args.debug)
+    n_iters = st.transfer_style(img_style, img_content, length=args.length, 
+                                init=args.init, ratio=np.float(args.ratio), 
+                                n_iter=args.num_iters, verbose=args.verbose)
     end = timeit.default_timer()
-    logging.info("Ran {0} iterations".format(n_iters))
-    logging.info("Took {0:.0f} seconds".format(end-start))
+    logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
 
     # DONE!
     st.save_generated(args.output)
+    logging.info("Output saved to {0}.".format(args.output))
 
-    ## shutdown cudamat - segfaults?
-    #if USE_CUDAMAT:
-    #    cm.cublas_shutdown()
+    # shutdown cudamat - segfaults?
+    if USE_CUDAMAT:
+        cm.cublas_shutdown()
