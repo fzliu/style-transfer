@@ -52,15 +52,18 @@ from skimage.transform import rescale
 try:
     import cudamat as cm
     cm.cublas_init(max_ones=1024*1024)
-    USE_CUDAMAT = True
+    USE_CUDAMAT = False
 except:
     USE_CUDAMAT = False
 
 
-INF = np.float32(np.inf)
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
 MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
 MODEL_DIR = "models"
+
+# style scale
+INF = np.float32(np.inf)
+STYLE_SCALE = 0.5
 
 # weights for the individual models
 VGG_WEIGHTS = {"content": {"conv4_2": 1},
@@ -69,8 +72,8 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.004,
-                                 "inception_3a/output": 0.996},
+GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.005,
+                                 "inception_3a/output": 0.995},
                      "style": {"conv1/7x7_s2": 0.1,
                                "conv2/3x3": 0.09,
                                "inception_3a/output": 0.09,
@@ -368,10 +371,10 @@ class StyleTransfer(object):
         """
 
         # rescale the images
-        scale_style = length / float(max(img_style.shape[:2]))
-        scale_content = length / float(max(img_content.shape[:2]))
-        img_style = rescale(img_style, scale_style*0.5)
-        img_content = rescale(img_content, scale_content)
+        scale = length / float(max(img_style.shape[:2]))
+        img_style = rescale(img_style, STYLE_SCALE*scale, order=3)
+        scale = length / float(max(img_content.shape[:2]))
+        img_content = rescale(img_content, scale, order=3)
 
         # compute style representations
         self._rescale_net(img_style)
