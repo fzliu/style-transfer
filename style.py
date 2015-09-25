@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/23/2015
+last modified: 09/25/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -48,6 +48,13 @@ from scipy.misc import imsave
 from scipy.optimize import minimize
 from skimage.transform import rescale
 
+try:
+    import progressbar as pb
+    gradIter = 0
+    pbar = pb.ProgressBar()
+    USE_PROGRESSBAR = True
+except:
+    USE_PROGRESSBAR = False 
 
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
 MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
@@ -192,6 +199,15 @@ def style_optfn(x, net, weights, G_style, F_content, ratio):
 
     return loss, grad
 
+def progress_callback(Xi):
+    global gradIter
+    global pbar
+    try:
+        pbar.update(gradIter)
+    except:
+        pbar.finished = True
+    gradIter += 1
+
 class StyleTransfer(object):
     """
         Style transfer class.
@@ -208,24 +224,22 @@ class StyleTransfer(object):
                 Output scale to use.
         """
 
-        base_path = os.path.join(MODEL_DIR, model_name)
-
         # googlenet
         if model_name == "googlenet":
-            model_file = os.path.join(base_path, "deploy.prototxt")
-            pretrained_file = os.path.join(base_path, "bvlc_googlenet.caffemodel")
+            model_file = os.path.join(MODEL_DIR, model_name, "deploy.prototxt")
+            pretrained_file = os.path.join(MODEL_DIR, model_name, "bvlc_googlenet.caffemodel")
             weights = GOOGLENET_WEIGHTS
 
         # vgg net
         elif model_name == "vgg":
-            model_file = os.path.join(base_path, "VGG_ILSVRC_19_layers_deploy.prototxt")
-            pretrained_file = os.path.join(base_path, "VGG_ILSVRC_19_layers.caffemodel")
+            model_file = os.path.join(MODEL_DIR, model_name, "VGG_ILSVRC_19_layers_deploy.prototxt")
+            pretrained_file = os.path.join(MODEL_DIR, model_name, "VGG_ILSVRC_19_layers.caffemodel")
             weights = VGG_WEIGHTS
 
         # default (caffenet)
         else:
-            model_file = os.path.join(base_path, "deploy.prototxt")
-            pretrained_file = os.path.join(base_path, "bvlc_reference_caffenet.caffemodel")
+            model_file = os.path.join(MODEL_DIR, model_name, "deploy.prototxt")
+            pretrained_file = os.path.join(MODEL_DIR, model_name, "bvlc_reference_caffenet.caffemodel")
             weights = CAFFENET_WEIGHTS
 
         # load model and scale factors
@@ -243,6 +257,9 @@ class StyleTransfer(object):
             :param str pretrained_file:
                 Path to pretrained caffe model.
         """
+
+        assert(os.path.isfile(model_file))
+        assert(os.path.isfile(pretrained_file))
 
         # load net (supressing output)
         out_orig = os.dup(2)
@@ -367,10 +384,23 @@ class StyleTransfer(object):
 
         # perform optimization
         minfn_args = (self.net, self.weights, G_style, F_content, ratio)
-        return minimize(style_optfn, img0.flatten(), args=minfn_args, 
-                        method="L-BFGS-B", jac=True, bounds=data_bounds, 
-                        options={"maxiter": n_iter, "disp": verbose}).nit
+        grad_method = "L-BFGS-B"
 
+        if USE_PROGRESSBAR and not verbose:
+            global pbar
+            pbar.widgets = ['Progress: ', 
+                pb.Percentage(), ' ', pb.Bar(marker=pb.AnimatedMarker()),
+                ' ', pb.ETA()]
+            pbar.maxval = n_iter
+            pbar.start()
+            return minimize(style_optfn, img0.flatten(), callback=progress_callback,
+                            args=minfn_args, method=grad_method, jac=True, bounds=data_bounds,
+                            options={"maxiter": n_iter, "disp": verbose}).nit
+        else:
+            if not verbose: print "Progress display requires the progressbar library."
+            return minimize(style_optfn, img0.flatten(), args=minfn_args, 
+                            method=grad_method, jac=True, bounds=data_bounds, 
+                            options={"maxiter": n_iter, "disp": verbose}).nit
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -399,12 +429,16 @@ if __name__ == "__main__":
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
+    if not args.verbose: print "Creating art takes time..."
     start = timeit.default_timer()
     n_iters = st.transfer_style(img_style, img_content, length=args.length, 
                                 init=args.init, ratio=np.float(args.ratio), 
                                 n_iter=args.num_iters, verbose=args.verbose)
     end = timeit.default_timer()
     logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
+    if USE_PROGRESSBAR and not args.verbose:
+        pbar.finish()
+
 
     # DONE!
     st.save_generated(args.output)

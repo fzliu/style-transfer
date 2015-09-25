@@ -1,3 +1,5 @@
 *.caffemodel
 outputs/*
 test/*
+images/results/*
+.DS_Store
