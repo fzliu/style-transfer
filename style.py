@@ -384,7 +384,6 @@ class StyleTransfer(object):
 
         # perform optimization
         minfn_args = (self.net, self.weights, G_style, F_content, ratio)
-        lbfgs_opts = {"maxiter": n_iter, "disp": verbose}
         grad_method = "L-BFGS-B"
 
         if USE_PROGRESSBAR and not verbose:
