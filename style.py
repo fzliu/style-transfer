@@ -29,7 +29,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 TODOs:
   - Verify model_WEIGHTS is working as expected
-  - Add progress bar for minimize call
 """
 
 # system imports
@@ -42,6 +41,7 @@ import timeit
 # library imports
 import caffe
 import numpy as np
+import progressbar as pb
 from scipy.fftpack import ifftn
 from scipy.linalg.blas import sgemm
 from scipy.misc import imsave
@@ -67,7 +67,8 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 1},
+GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 0.5,
+                                 "inception_3b/output": 0.5},
                      "style": {"conv1/7x7_s2": 0.1,
                                "conv2/3x3": 0.1,
                                "inception_3a/output": 0.1,
@@ -91,7 +92,7 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
+parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
@@ -112,8 +113,6 @@ def _compute_style_grad(F, G, G_style, layer):
     loss = c/4 * (El**2).sum()
     grad = c * sgemm(1.0, El, Fl) * (Fl>0)
 
-    grad /= np.nextafter(np.abs(grad).sum(), INF)
-
     return loss, grad
 
 def _compute_content_grad(F, F_content, layer):
@@ -126,8 +125,6 @@ def _compute_content_grad(F, F_content, layer):
     El = Fl - F_content[layer]
     loss = (El**2).sum() / 2
     grad = El * (Fl>0)
-
-    grad /= np.nextafter(np.abs(grad).sum(), INF)
 
     return loss, grad
 
@@ -199,12 +196,26 @@ def style_optfn(x, net, weights, reprs, ratio):
 
     return loss, grad
 
+def progress_cbfn(Xi):
+    """
+        Callback function to update the progress bar.
+    """
+    global grad_iter
+    global pbar
+
+    # update
+    try:
+        pbar.update(grad_iter)
+    except:
+        pbar.finished = True
+    grad_iter += 1
+
 class StyleTransfer(object):
     """
         Style transfer class.
     """
 
-    def __init__(self, model_name):
+    def __init__(self, model_name, use_pbar=True):
         """
             Initialize the model used for style transfer.
 
@@ -239,6 +250,26 @@ class StyleTransfer(object):
         self.load_model(model_file, pretrained_file)
         self.weights = weights.copy()
 
+        # use progress bar
+        if use_pbar:
+            self.grad_iter = 0
+
+            # create progressbar
+            pbar = pb.ProgressBar()
+            pbar.widgets = ["Optimizing: ", pb.Percentage(), 
+                            " ", pb.Bar(marker=pb.AnimatedMarker()),
+                            " ", pb.ETA()]
+            self.pbar = pbar
+
+            # progressbar callback
+            def pbar_cbfn(xk):
+                self.grad_iter += 1
+                self.pbar.update(self.grad_iter)
+            self.pbar_cbfn = pbar_cbfn
+
+        else:
+            self.pbar = None
+
 
     def load_model(self, model_file, pretrained_file):
         """
@@ -250,6 +281,9 @@ class StyleTransfer(object):
             :param str pretrained_file:
                 Path to pretrained caffe model.
         """
+
+        assert(os.path.isfile(model_file))
+        assert(os.path.isfile(pretrained_file))
 
         # load net (supressing stderr output)
         out_orig = os.dup(2)
@@ -374,13 +408,25 @@ class StyleTransfer(object):
                       [(data_min[1], data_max[1])]*(img0.size/3) + \
                       [(data_min[2], data_max[2])]*(img0.size/3)
 
-        # perform optimization
-        reprs = (G_style, F_content)
-        minfn_args = (self.net, self.weights, reprs, ratio)
-        return minimize(style_optfn, img0.flatten(), args=minfn_args, 
-                        method="L-BFGS-B", jac=True, bounds=data_bounds, 
-                        options={"maxiter": n_iter, "iprint": 1}).nit
+        # optimization params
+        grad_method = "L-BFGS-B"
+        minfn_args = {
+            "args": (self.net, self.weights, (G_style, F_content), ratio),
+            "method": grad_method, "jac": True, "bounds": data_bounds,
+            "options": {"maxiter": n_iter, "disp": verbose}
+        }
 
+        # optimize
+        if self.pbar is not None and not verbose:
+            print("Creating art takes time...")
+            self.pbar.start()
+            self.pbar.maxval = n_iter
+            minfn_args["callback"] = self.pbar_cbfn
+            res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
+            self.pbar.finish()
+            return res
+        else:
+            return minimize(style_optfn, img0.flatten(), **minfn_args).nit
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -405,7 +451,7 @@ if __name__ == "__main__":
     logging.info("Successfully loaded images.")
     
     # artistic style class
-    st = StyleTransfer(args.model.lower())
+    st = StyleTransfer(args.model.lower(), use_pbar=True)
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
