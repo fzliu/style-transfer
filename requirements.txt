@@ -4,4 +4,3 @@ REQUIRED:
     scikit-image>=0.9.3
 OPTIONAL:
     progressbar>=2.3
-    cudamat
