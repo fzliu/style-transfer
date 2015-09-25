@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/23/2015
+last modified: 09/25/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -49,13 +49,16 @@ from scipy.optimize import minimize
 from skimage.transform import rescale
 
 
+# logging
+LOG_FORMAT = "%(filename)s:%(funcName)s:%(asctime)s.%(msecs)03d -- %(message)s"
+
+# paths for Caffe and models
 CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
 MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
-MODEL_DIR = "models"
 
-# constants
+# numeric constants
 INF = np.float32(np.inf)
-STYLE_SCALE = 0.5
+STYLE_SCALE = 1.0
 
 # weights for the individual models
 VGG_WEIGHTS = {"content": {"conv4_2": 1},
@@ -64,19 +67,18 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.005,
-                                 "inception_3a/output": 0.995},
+GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.001,
+                                 "inception_3a/output": 0.999},
                      "style": {"conv1/7x7_s2": 0.1,
-                               "conv2/3x3": 0.09,
-                               "inception_3a/output": 0.09,
-                               "inception_3b/output": 0.09,
-                               "inception_4a/output": 0.09,
-                               "inception_4b/output": 0.09,
-                               "inception_4c/output": 0.09,
-                               "inception_4d/output": 0.09,
-                               "inception_4e/output": 0.09,
-                               "inception_5a/output": 0.09,
-                               "inception_5b/output": 0.09,}}
+                               "conv2/3x3": 0.1,
+                               "inception_3a/output": 0.1,
+                               "inception_3b/output": 0.1,
+                               "inception_4a/output": 0.1,
+                               "inception_4b/output": 0.1,
+                               "inception_4c/output": 0.1,
+                               "inception_4d/output": 0.1,
+                               "inception_5a/output": 0.1,
+                               "inception_5b/output": 0.1}}
 CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
@@ -84,20 +86,19 @@ CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                               "conv4": 0.2,
                               "conv5": 0.2}}
 
-
 # argparse
 parser = argparse.ArgumentParser(description="Transfer the style of one image to another.",
                                  usage="style.py -s <style_image> -c <content_image>")
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
+parser.add_argument("-m", "--model", default="googlenet", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-l", "--length", default=640, type=float, required=False, help="maximum image length")
 parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
-parser.add_argument("-o", "--output", default="outputs/result.jpg", required=False, help="output path")
+parser.add_argument("-o", "--output", default=None, required=False, help="output path")
 
 
 def _compute_style_grad(F, G, G_style, layer):
@@ -112,6 +113,8 @@ def _compute_style_grad(F, G, G_style, layer):
     loss = c/4 * (El**2).sum()
     grad = c * sgemm(1.0, El, Fl) * (Fl>0)
 
+    grad /= np.nextafter(np.abs(grad).sum(), INF)
+
     return loss, grad
 
 def _compute_content_grad(F, F_content, layer):
@@ -125,14 +128,16 @@ def _compute_content_grad(F, F_content, layer):
     loss = (El**2).sum() / 2
     grad = El * (Fl>0)
 
+    grad /= np.nextafter(np.abs(grad).sum(), INF)
+
     return loss, grad
 
-def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
+def _compute_reprs(net_in, net, layers_style, layers_content, gram_scale=1):
     """
         Computes representation matrices for an image.
     """
 
-    # copy activations to output from forward pass
+    # copy data and forward pass
     (repr_s, repr_c) = ({}, {})
     net.blobs["data"].data[0] = net_in
     net.forward(end=net.params.keys()[-1])
@@ -143,21 +148,24 @@ def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
         F.shape = (F.shape[0], -1)
         repr_c[layer] = F
         if layer in layers_style:
-            repr_s[layer] = sgemm(scale_gram, F, F.T)
+            repr_s[layer] = sgemm(gram_scale, F, F.T)
 
     return repr_s, repr_c
 
-def style_optfn(x, net, weights, G_style, F_content, ratio):
+def style_optfn(x, net, weights, reprs, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
     """
 
-    # initialize update params
+    # update params
     layers_all = net.params.keys()[::-1]
     layers_style = weights["style"].keys()
     layers_content = weights["content"].keys()
     net_in = x.reshape(net.blobs["data"].data.shape[1:])
-    (G, F) = _compute_reprs(net, layers_style, layers_content, net_in)
+
+    # compute representations
+    (G_style, F_content) = reprs
+    (G, F) = _compute_reprs(net_in, net, layers_style, layers_content)
 
     # backprop by layer
     loss = 0
@@ -208,7 +216,7 @@ class StyleTransfer(object):
                 Output scale to use.
         """
 
-        base_path = os.path.join(MODEL_DIR, model_name)
+        base_path = os.path.join("models", model_name)
 
         # googlenet
         if model_name == "googlenet":
@@ -244,7 +252,7 @@ class StyleTransfer(object):
                 Path to pretrained caffe model.
         """
 
-        # load net (supressing output)
+        # load net (supressing stderr output)
         out_orig = os.dup(2)
         null_fds = os.open(os.devnull, os.O_RDWR)
         os.dup2(null_fds, 2)
@@ -276,16 +284,16 @@ class StyleTransfer(object):
             if not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
 
-        # prettify the generated image and save it
+        # deprocess the generated image and save it
         img = self.transformer.deprocess("data", self.net.blobs["data"].data)
-        img = (255*img).astype(np.uint8)
-        imsave(path, img)
+        imsave(path, (255*img).astype(np.uint8))
     
     def _rescale_net(self, img):
         """
             Rescales the network to fit a particular image.
         """
 
+        # get new dimensions and rescale net + transformer
         new_dims = (1, img.shape[2]) + img.shape[:2]
         self.net.blobs["data"].reshape(*new_dims)
         self.transformer.inputs["data"] = new_dims
@@ -320,7 +328,7 @@ class StyleTransfer(object):
         return x0
 
     def transfer_style(self, img_style, img_content, length=640,
-                       ratio=1e5, n_iter=500, init=None, verbose=False):
+                       ratio=1e5, n_iter=500, init="-1", verbose=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -338,23 +346,25 @@ class StyleTransfer(object):
         img_content = rescale(img_content, scale, order=3)
 
         # compute style representations
-        self._rescale_net(img_style)
+        self._rescale_net(img_content)
         layers = self.weights["style"].keys()
         net_in = self.transformer.preprocess("data", img_style)
-        scale_gram = float(img_content.size)/img_style.size
-        (G_style, _) = _compute_reprs(self.net, layers, [], net_in,
-                                      scale_gram=scale_gram)
+        gram_scale = float(img_content.size)/img_style.size
+        G_style = _compute_reprs(net_in, self.net, layers, [],
+                                 gram_scale=gram_scale)[0]
 
         # compute content representations
         self._rescale_net(img_content)
         layers = self.weights["content"].keys()
         net_in = self.transformer.preprocess("data", img_content)
-        (_, F_content) = _compute_reprs(self.net, [], layers, net_in)
+        F_content = _compute_reprs(net_in, self.net, [], layers)[1]
 
         # generate initial net input
-        # default = content image, see kaishengtai/neuralart
+        # "content" = content image, see kaishengtai/neuralart
         if init == "content":
             img0 = self.transformer.preprocess("data", img_content)
+        elif isinstance(init, np.ndarray):
+            img0 = self.transformer.preprocess("data", init)
         else:
             img0 = self._make_noise_input(init)
 
@@ -366,19 +376,19 @@ class StyleTransfer(object):
                       [(data_min[2], data_max[2])]*(img0.size/3)
 
         # perform optimization
-        minfn_args = (self.net, self.weights, G_style, F_content, ratio)
+        reprs = (G_style, F_content)
+        minfn_args = (self.net, self.weights, reprs, ratio)
         return minimize(style_optfn, img0.flatten(), args=minfn_args, 
                         method="L-BFGS-B", jac=True, bounds=data_bounds, 
-                        options={"maxiter": n_iter, "disp": verbose}).nit
+                        options={"maxiter": n_iter, "iprint": 1}).nit
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
     # logging
-    format = "%(filename)s:%(lineno)d  %(asctime)s -- %(message)s"
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(format=format, level=level)
+    level = logging.INFO if args.verbose else logging.DEBUG
+    logging.basicConfig(format=LOG_FORMAT, datefmt="%H:%M:%S", level=level)
     logging.info("Starting style transfer.")
 
     # set GPU/CPU mode
@@ -387,6 +397,7 @@ if __name__ == "__main__":
         logging.info("Running net on CPU.")
     else:
         caffe.set_device(args.gpu_id)
+        caffe.set_mode_gpu()
         logging.info("Running net on GPU {0}.".format(args.gpu_id))
 
     # load images
@@ -406,6 +417,15 @@ if __name__ == "__main__":
     end = timeit.default_timer()
     logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
 
+    # output path
+    if args.output is not None:
+        out_path = args.output
+    else:
+        out_path_fmt = (os.path.splitext(os.path.split(args.style_img)[1])[0], 
+                        os.path.splitext(os.path.split(args.content_img)[1])[0], 
+                        args.model, args.init, args.ratio, args.num_iters)
+        out_path = "outputs/{0}-{1}-{2}-{3}-{4}-{5}.jpg".format(*out_path_fmt)
+
     # DONE!
-    st.save_generated(args.output)
-    logging.info("Output saved to {0}.".format(args.output))
+    st.save_generated(out_path)
+    logging.info("Output saved to {0}.".format(out_path))
