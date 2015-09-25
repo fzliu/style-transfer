@@ -3,4 +3,3 @@ outputs/*
 test/*
 images/results/*
 .DS_Store
-iterate.dat
