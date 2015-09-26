@@ -67,18 +67,13 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 0.5,
-                                 "inception_3b/output": 0.5},
-                     "style": {"conv1/7x7_s2": 0.1,
-                               "conv2/3x3": 0.1,
-                               "inception_3a/output": 0.1,
-                               "inception_3b/output": 0.1,
-                               "inception_4a/output": 0.1,
-                               "inception_4b/output": 0.1,
-                               "inception_4c/output": 0.1,
-                               "inception_4d/output": 0.1,
-                               "inception_5a/output": 0.1,
-                               "inception_5b/output": 0.1}}
+GOOGLENET_WEIGHTS = {"content": {"inception_3b/output": 0.5,
+                                 "inception_4a/output": 0.5},
+                     "style": {"conv1/7x7_s2": 0.2,
+                               "conv2/3x3": 0.2,
+                               "inception_3a/output": 0.2,
+                               "inception_4a/output": 0.2,
+                               "inception_5a/output": 0.2}}
 CAFFENET_WEIGHTS = {"content": {"conv3": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
@@ -96,7 +91,7 @@ parser.add_argument("-m", "--model", default="vgg", type=str, required=False, he
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
-parser.add_argument("-l", "--length", default=640, type=float, required=False, help="maximum image length")
+parser.add_argument("-l", "--length", default=512, type=float, required=False, help="maximum image length")
 parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
 parser.add_argument("-o", "--output", default=None, required=False, help="output path")
 
@@ -196,20 +191,6 @@ def style_optfn(x, net, weights, reprs, ratio):
 
     return loss, grad
 
-def progress_cbfn(Xi):
-    """
-        Callback function to update the progress bar.
-    """
-    global grad_iter
-    global pbar
-
-    # update
-    try:
-        pbar.update(grad_iter)
-    except:
-        pbar.finished = True
-    grad_iter += 1
-
 class StyleTransfer(object):
     """
         Style transfer class.
@@ -264,9 +245,13 @@ class StyleTransfer(object):
             # progressbar callback
             def pbar_cbfn(xk):
                 self.grad_iter += 1
-                self.pbar.update(self.grad_iter)
+                try:
+                    self.pbar.update(self.grad_iter)
+                except:
+                    self.pbar.finished = True
             self.pbar_cbfn = pbar_cbfn
 
+        # don't use progress bar
         else:
             self.pbar = None
 
@@ -286,8 +271,8 @@ class StyleTransfer(object):
         assert(os.path.isfile(pretrained_file))
 
         # load net (supressing stderr output)
-        out_orig = os.dup(2)
         null_fds = os.open(os.devnull, os.O_RDWR)
+        out_orig = os.dup(2)
         os.dup2(null_fds, 2)
         net = caffe.Net(model_file, pretrained_file, caffe.TEST)
         os.dup2(out_orig, 2)
