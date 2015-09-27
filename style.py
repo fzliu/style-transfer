@@ -67,8 +67,7 @@ VGG_WEIGHTS = {"content": {"conv4_2": 1},
                          "conv3_1": 0.2,
                          "conv4_1": 0.2,
                          "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3b/output": 0.5,
-                                 "inception_4a/output": 0.5},
+GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 1},
                      "style": {"conv1/7x7_s2": 0.2,
                                "conv2/3x3": 0.2,
                                "inception_3a/output": 0.2,
@@ -143,13 +142,12 @@ def _compute_reprs(net_in, net, layers_style, layers_content, gram_scale=1):
 
     return repr_s, repr_c
 
-def style_optfn(x, net, weights, reprs, ratio):
+def style_optfn(x, net, weights, layers, reprs, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
     """
 
     # update params
-    layers_all = net.params.keys()[::-1]
     layers_style = weights["style"].keys()
     layers_content = weights["content"].keys()
     net_in = x.reshape(net.blobs["data"].data.shape[1:])
@@ -160,24 +158,24 @@ def style_optfn(x, net, weights, reprs, ratio):
 
     # backprop by layer
     loss = 0
-    net.blobs[layers_all[-1]].diff[:] = 0
-    for i, layer in enumerate(layers_all):
-        next_layer = None if i == len(layers_all)-1 else layers_all[i+1]
+    net.blobs[layers[-1]].diff[:] = 0
+    for i, layer in enumerate(reversed(layers)):
+        next_layer = None if i == len(layers)-1 else layers[-i-2]
         grad = net.blobs[layer].diff[0]
 
         # style contribution
         if layer in layers_style:
             wl = weights["style"][layer]
             (l, g) = _compute_style_grad(F, G, G_style, layer)
-            loss += ratio * wl * l
-            grad += ratio * wl * g.reshape(grad.shape)
+            loss += wl * l
+            grad += wl * g.reshape(grad.shape)
 
         # content contribution
         if layer in layers_content:
             wl = weights["content"][layer]
             (l, g) = _compute_content_grad(F, F_content, layer)
-            loss += wl * l
-            grad += wl * g.reshape(grad.shape)
+            loss += wl * l / ratio
+            grad += wl * g.reshape(grad.shape) / ratio
 
         # compute gradient
         net.backward(start=layer, end=next_layer)
@@ -227,9 +225,13 @@ class StyleTransfer(object):
             pretrained_file = os.path.join(base_path, "bvlc_reference_caffenet.caffemodel")
             weights = CAFFENET_WEIGHTS
 
-        # load model and scale factors
+        # add model and weights
         self.load_model(model_file, pretrained_file)
         self.weights = weights.copy()
+        self.layers = []
+        for layer in self.net.params.keys():
+            if layer in self.weights["style"] or layer in self.weights["content"]:
+                self.layers.append(layer)
 
         # use progress bar
         if use_pbar:
@@ -359,17 +361,17 @@ class StyleTransfer(object):
 
         # rescale the images
         scale = length / float(max(img_style.shape[:2]))
-        img_style = rescale(img_style, STYLE_SCALE*scale, order=3)
+        img_style = rescale(img_style, STYLE_SCALE*scale)
         scale = length / float(max(img_content.shape[:2]))
-        img_content = rescale(img_content, scale, order=3)
+        img_content = rescale(img_content, scale)
 
         # compute style representations
-        self._rescale_net(img_content)
+        self._rescale_net(img_style)
         layers = self.weights["style"].keys()
         net_in = self.transformer.preprocess("data", img_style)
         gram_scale = float(img_content.size)/img_style.size
         G_style = _compute_reprs(net_in, self.net, layers, [],
-                                 gram_scale=gram_scale)[0]
+                                 gram_scale=1)[0]
 
         # compute content representations
         self._rescale_net(img_content)
@@ -395,8 +397,9 @@ class StyleTransfer(object):
 
         # optimization params
         grad_method = "L-BFGS-B"
+        reprs = (G_style, F_content)
         minfn_args = {
-            "args": (self.net, self.weights, (G_style, F_content), ratio),
+            "args": (self.net, self.weights, self.layers, reprs, ratio),
             "method": grad_method, "jac": True, "bounds": data_bounds,
             "options": {"maxiter": n_iter, "disp": verbose}
         }
@@ -409,6 +412,9 @@ class StyleTransfer(object):
             minfn_args["callback"] = self.pbar_cbfn
             res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
             self.pbar.finish()
+            print("{0}".format(TIME1))
+            print("{0}".format(TIME2))
+
             return res
         else:
             return minimize(style_optfn, img0.flatten(), **minfn_args).nit
