@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/25/2015
+last modified: 09/27/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -240,8 +240,8 @@ class StyleTransfer(object):
             # create progressbar
             pbar = pb.ProgressBar()
             pbar.widgets = ["Optimizing: ", pb.Percentage(), 
-                            "\t", pb.Bar(marker=pb.AnimatedMarker()),
-                            "\t", pb.AdaptiveETA()]
+                            " ", pb.Bar(marker=pb.AnimatedMarker()),
+                            " ", pb.ETA()]
             self.pbar = pbar
 
             # progressbar callback
