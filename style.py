@@ -240,8 +240,8 @@ class StyleTransfer(object):
             # create progressbar
             pbar = pb.ProgressBar()
             pbar.widgets = ["Optimizing: ", pb.Percentage(), 
-                            " ", pb.Bar(marker=pb.AnimatedMarker()),
-                            " ", pb.ETA()]
+                            "\t", pb.Bar(marker=pb.AnimatedMarker()),
+                            "\t", pb.AdaptiveETA()]
             self.pbar = pbar
 
             # progressbar callback
@@ -412,8 +412,6 @@ class StyleTransfer(object):
             minfn_args["callback"] = self.pbar_cbfn
             res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
             self.pbar.finish()
-            print("{0}".format(TIME1))
-            print("{0}".format(TIME2))
 
             return res
         else:
