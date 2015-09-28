@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/27/2015
+last modified: 09/28/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -46,6 +46,7 @@ from scipy.fftpack import ifftn
 from scipy.linalg.blas import sgemm
 from scipy.misc import imsave
 from scipy.optimize import minimize
+from skimage import img_as_ubyte
 from skimage.transform import rescale
 
 
@@ -89,7 +90,7 @@ parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help
 parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
-parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
+parser.add_argument("-n", "--num-iters", default=512, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-l", "--length", default=512, type=float, required=False, help="maximum image length")
 parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
 parser.add_argument("-o", "--output", default=None, required=False, help="output path")
@@ -232,19 +233,10 @@ class StyleTransfer(object):
         for layer in self.net.params.keys():
             if layer in self.weights["style"] or layer in self.weights["content"]:
                 self.layers.append(layer)
+        self.use_pbar = use_pbar
 
-        # use progress bar
-        if use_pbar:
-            self.grad_iter = 0
-
-            # create progressbar
-            pbar = pb.ProgressBar()
-            pbar.widgets = ["Optimizing: ", pb.Percentage(), 
-                            " ", pb.Bar(marker=pb.AnimatedMarker()),
-                            " ", pb.ETA()]
-            self.pbar = pbar
-
-            # progressbar callback
+        # create progress bar callback
+        if self.use_pbar:
             def pbar_cbfn(xk):
                 self.grad_iter += 1
                 try:
@@ -252,11 +244,6 @@ class StyleTransfer(object):
                 except:
                     self.pbar.finished = True
             self.pbar_cbfn = pbar_cbfn
-
-        # don't use progress bar
-        else:
-            self.pbar = None
-
 
     def load_model(self, model_file, pretrained_file):
         """
@@ -291,7 +278,7 @@ class StyleTransfer(object):
         self.net = net
         self.transformer = transformer
 
-    def save_generated(self, path):
+    def get_generated(self):
         """
             Saves the generated image (net input, after optimization).
 
@@ -299,14 +286,9 @@ class StyleTransfer(object):
                 Output path.
         """
 
-        # check output directory
-        if os.path.dirname(path):
-            if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
-
-        # deprocess the generated image and save it
-        img = self.transformer.deprocess("data", self.net.blobs["data"].data)
-        imsave(path, (255*img).astype(np.uint8))
+        data = self.net.blobs["data"].data
+        img_out = self.transformer.deprocess("data", data)
+        return img_out
     
     def _rescale_net(self, img):
         """
@@ -347,7 +329,19 @@ class StyleTransfer(object):
 
         return x0
 
-    def transfer_style(self, img_style, img_content, length=640,
+    def _create_pbar(self, max_iter):
+        """
+            Creates a progress bar.
+        """
+
+        self.grad_iter = 0
+        self.pbar = pb.ProgressBar()
+        self.pbar.widgets = ["Optimizing: ", pb.Percentage(), 
+                             " ", pb.Bar(marker=pb.AnimatedMarker()),
+                             " ", pb.ETA()]
+        self.pbar.maxval = max_iter
+
+    def transfer_style(self, img_style, img_content, length=512,
                        ratio=1e5, n_iter=500, init="-1", verbose=False):
         """
             Transfers the style of the artwork to the input image.
@@ -356,7 +350,7 @@ class StyleTransfer(object):
                 A style image with the desired target style.
 
             :param numpy.ndarray img_content:
-                A content image in 8-bit, RGB format.
+                A content image in floating point, RGB format.
         """
 
         # rescale the images
@@ -405,17 +399,16 @@ class StyleTransfer(object):
         }
 
         # optimize
-        if self.pbar is not None and not verbose:
-            print("Creating art takes time...")
-            self.pbar.start()
-            self.pbar.maxval = n_iter
+        if self.use_pbar and not verbose:
+            self._create_pbar(n_iter)
             minfn_args["callback"] = self.pbar_cbfn
+            self.pbar.start()
             res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
             self.pbar.finish()
-
-            return res
         else:
-            return minimize(style_optfn, img0.flatten(), **minfn_args).nit
+            res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
+
+        return res
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -444,22 +437,30 @@ if __name__ == "__main__":
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
-    start = timeit.default_timer()
-    n_iters = st.transfer_style(img_style, img_content, length=args.length, 
-                                init=args.init, ratio=np.float(args.ratio), 
-                                n_iter=args.num_iters, verbose=args.verbose)
-    end = timeit.default_timer()
-    logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
+    img_out = None
+    for i in range(2, -1, -1):
+        logging.info("Minimization pass {0} of 3.".format(3-i))
+        length = args.length // 2**i
+        init = args.init if img_out is None else img_out
+        ratio = np.float(args.ratio) / 64**i
+        n_iter = args.num_iters // 4**(2-i)
+        start = timeit.default_timer()
+        n_iters = st.transfer_style(img_style, img_content, length=length,
+                                    init=init, ratio=ratio, n_iter=n_iter,
+                                    verbose=args.verbose)
+        end = timeit.default_timer()
+        logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
+        img_out = st.get_generated()
 
     # output path
     if args.output is not None:
         out_path = args.output
     else:
-        out_path_fmt = (os.path.splitext(os.path.split(args.style_img)[1])[0], 
-                        os.path.splitext(os.path.split(args.content_img)[1])[0], 
+        out_path_fmt = (os.path.splitext(os.path.split(args.content_img)[1])[0], 
+                        os.path.splitext(os.path.split(args.style_img)[1])[0], 
                         args.model, args.init, args.ratio, args.num_iters)
         out_path = "outputs/{0}-{1}-{2}-{3}-{4}-{5}.jpg".format(*out_path_fmt)
 
     # DONE!
-    st.save_generated(out_path)
+    imsave(out_path, img_as_ubyte(img_out))
     logging.info("Output saved to {0}.".format(out_path))
