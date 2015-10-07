@@ -52,7 +52,7 @@ LOG_FORMAT = "%(filename)s:%(funcName)s:%(asctime)s.%(msecs)03d -- %(message)s"
 
 # numeric constants
 INF = np.float32(np.inf)
-STYLE_SCALE = 1.0
+STYLE_SCALE = 1.2
 
 # weights for the individual models
 # assume that corresponding layers' top blob matches its name

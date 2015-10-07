@@ -1,4 +1,5 @@
 *.caffemodel
+*.pyc
 outputs/*
 test/*
 .DS_Store
