@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/28/2015
+last modified: 10/06/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -26,9 +26,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-TODOs:
-  - Verify model_WEIGHTS is working as expected
 """
 
 # system imports
@@ -53,28 +50,32 @@ from skimage.transform import rescale
 # logging
 LOG_FORMAT = "%(filename)s:%(funcName)s:%(asctime)s.%(msecs)03d -- %(message)s"
 
-# paths for Caffe and models
-CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
-MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
-
 # numeric constants
 INF = np.float32(np.inf)
 STYLE_SCALE = 1.0
 
 # weights for the individual models
-VGG_WEIGHTS = {"content": {"conv4_2": 1},
-               "style": {"conv1_1": 0.2,
-                         "conv2_1": 0.2,
-                         "conv3_1": 0.2,
-                         "conv4_1": 0.2,
-                         "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 1},
+# assume that corresponding layers' top blob matches its name
+VGG19_WEIGHTS = {"content": {"conv4_2": 1},
+                 "style": {"conv1_1": 0.2,
+                           "conv2_1": 0.2,
+                           "conv3_1": 0.2,
+                           "conv4_1": 0.2,
+                           "conv5_1": 0.2}}
+VGG16_WEIGHTS = {"content": {"conv4_2": 1},
+                 "style": {"conv1_1": 0.2,
+                           "conv2_1": 0.2,
+                           "conv3_1": 0.2,
+                           "conv4_1": 0.2,
+                           "conv5_1": 0.2}}
+GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 2e-4,
+                                 "inception_3a/output": 1-2e-4},
                      "style": {"conv1/7x7_s2": 0.2,
                                "conv2/3x3": 0.2,
                                "inception_3a/output": 0.2,
                                "inception_4a/output": 0.2,
                                "inception_5a/output": 0.2}}
-CAFFENET_WEIGHTS = {"content": {"conv3": 1},
+CAFFENET_WEIGHTS = {"content": {"conv4": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
                               "conv3": 0.2,
@@ -87,7 +88,7 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
+parser.add_argument("-m", "--model", default="vgg19", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-n", "--num-iters", default=512, type=int, required=False, help="L-BFGS iterations")
@@ -128,10 +129,10 @@ def _compute_reprs(net_in, net, layers_style, layers_content, gram_scale=1):
         Computes representation matrices for an image.
     """
 
-    # copy data and forward pass
+    # input data and forward pass
     (repr_s, repr_c) = ({}, {})
     net.blobs["data"].data[0] = net_in
-    net.forward(end=net.params.keys()[-1])
+    net.forward()
 
     # loop through combined set of layers
     for layer in set(layers_style)|set(layers_content):
@@ -146,6 +147,24 @@ def _compute_reprs(net_in, net, layers_style, layers_content, gram_scale=1):
 def style_optfn(x, net, weights, layers, reprs, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
+
+        :param numpy.ndarray x:
+            Flattened data array.
+
+        :param caffe.Net net:
+            Network to use to generate gradients.
+
+        :param dict weights:
+            Weights to use in the network.
+
+        :param list layers:
+            Layers to use in the network.
+
+        :param tuple reprs:
+            Representation matrices packed in a tuple.
+
+        :param float ratio:
+            Style-to-content ratio.
     """
 
     # update params
@@ -168,15 +187,15 @@ def style_optfn(x, net, weights, layers, reprs, ratio):
         if layer in layers_style:
             wl = weights["style"][layer]
             (l, g) = _compute_style_grad(F, G, G_style, layer)
-            loss += wl * l
-            grad += wl * g.reshape(grad.shape)
+            loss += wl * l * ratio
+            grad += wl * g.reshape(grad.shape) * ratio
 
         # content contribution
         if layer in layers_content:
             wl = weights["content"][layer]
             (l, g) = _compute_content_grad(F, F_content, layer)
-            loss += wl * l / ratio
-            grad += wl * g.reshape(grad.shape) / ratio
+            loss += wl * l
+            grad += wl * g.reshape(grad.shape)
 
         # compute gradient
         net.backward(start=layer, end=next_layer)
@@ -202,38 +221,51 @@ class StyleTransfer(object):
             :param str model_name:
                 Model to use.
 
-            :param tuple scale_output:
-                Output scale to use.
+            :param bool use_pbar:
+                Use progressbar flag.
         """
 
         base_path = os.path.join("models", model_name)
 
-        # googlenet
-        if model_name == "googlenet":
-            model_file = os.path.join(base_path, "deploy.prototxt")
-            pretrained_file = os.path.join(base_path, "bvlc_googlenet.caffemodel")
-            weights = GOOGLENET_WEIGHTS
-
-        # vgg net
-        elif model_name == "vgg":
+        # vgg19
+        if model_name == "vgg19":
             model_file = os.path.join(base_path, "VGG_ILSVRC_19_layers_deploy.prototxt")
             pretrained_file = os.path.join(base_path, "VGG_ILSVRC_19_layers.caffemodel")
-            weights = VGG_WEIGHTS
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
+            weights = VGG19_WEIGHTS
 
-        # default (caffenet)
-        else:
+        # vgg16
+        elif model_name == "vgg16":
+            model_file = os.path.join(base_path, "VGG_ILSVRC_16_layers_deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "VGG_ILSVRC_16_layers.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
+            weights = VGG16_WEIGHTS
+
+        # googlenet
+        elif model_name == "googlenet":
+            model_file = os.path.join(base_path, "deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "googlenet_style.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
+            weights = GOOGLENET_WEIGHTS
+
+        # caffenet
+        elif model_name == "caffenet":
             model_file = os.path.join(base_path, "deploy.prototxt")
             pretrained_file = os.path.join(base_path, "bvlc_reference_caffenet.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
             weights = CAFFENET_WEIGHTS
 
+        else:
+            assert False, "model not available"
+
         # add model and weights
-        self.load_model(model_file, pretrained_file)
+        self.load_model(model_file, pretrained_file, mean_file)
         self.weights = weights.copy()
+        self.use_pbar = use_pbar
         self.layers = []
         for layer in self.net.params.keys():
             if layer in self.weights["style"] or layer in self.weights["content"]:
                 self.layers.append(layer)
-        self.use_pbar = use_pbar
 
         # create progress bar callback
         if self.use_pbar:
@@ -245,7 +277,7 @@ class StyleTransfer(object):
                     self.pbar.finished = True
             self.pbar_cbfn = pbar_cbfn
 
-    def load_model(self, model_file, pretrained_file):
+    def load_model(self, model_file, pretrained_file, mean_file):
         """
             Loads specified model from caffe install (see caffe docs).
 
@@ -254,10 +286,10 @@ class StyleTransfer(object):
 
             :param str pretrained_file:
                 Path to pretrained caffe model.
-        """
 
-        assert(os.path.isfile(model_file))
-        assert(os.path.isfile(pretrained_file))
+            :param str mean_file:
+                Path to mean file.
+        """
 
         # load net (supressing stderr output)
         null_fds = os.open(os.devnull, os.O_RDWR)
@@ -269,7 +301,7 @@ class StyleTransfer(object):
 
         # all models used are trained on imagenet data
         transformer = caffe.io.Transformer({"data": net.blobs["data"].data.shape})
-        transformer.set_mean("data", np.load(MEAN_PATH).mean(1).mean(1))
+        transformer.set_mean("data", np.load(mean_file).mean(1).mean(1))
         transformer.set_channel_swap("data", (2,1,0))
         transformer.set_transpose("data", (2,0,1))
         transformer.set_raw_scale("data", 255)
@@ -342,7 +374,7 @@ class StyleTransfer(object):
         self.pbar.maxval = max_iter
 
     def transfer_style(self, img_style, img_content, length=512,
-                       ratio=1e5, n_iter=500, init="-1", verbose=False):
+                       ratio=1e5, n_iter=512, init="-1", verbose=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -395,7 +427,7 @@ class StyleTransfer(object):
         minfn_args = {
             "args": (self.net, self.weights, self.layers, reprs, ratio),
             "method": grad_method, "jac": True, "bounds": data_bounds,
-            "options": {"maxiter": n_iter, "disp": verbose}
+            "options": {"maxcor": 8, "maxiter": n_iter, "disp": verbose}
         }
 
         # optimize
@@ -410,8 +442,10 @@ class StyleTransfer(object):
 
         return res
 
-if __name__ == "__main__":
-    args = parser.parse_args()
+def main(args):
+    """
+        Entry point.
+    """
 
     # logging
     level = logging.INFO if args.verbose else logging.DEBUG
@@ -437,20 +471,13 @@ if __name__ == "__main__":
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
-    img_out = None
-    for i in range(2, -1, -1):
-        logging.info("Minimization pass {0} of 3.".format(3-i))
-        length = args.length // 2**i
-        init = args.init if img_out is None else img_out
-        ratio = np.float(args.ratio) / 64**i
-        n_iter = args.num_iters // 4**(2-i)
-        start = timeit.default_timer()
-        n_iters = st.transfer_style(img_style, img_content, length=length,
-                                    init=init, ratio=ratio, n_iter=n_iter,
-                                    verbose=args.verbose)
-        end = timeit.default_timer()
-        logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
-        img_out = st.get_generated()
+    start = timeit.default_timer()
+    n_iters = st.transfer_style(img_style, img_content, length=args.length, 
+                                init=args.init, ratio=np.float(args.ratio), 
+                                n_iter=args.num_iters, verbose=args.verbose)
+    end = timeit.default_timer()
+    logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
+    img_out = st.get_generated()
 
     # output path
     if args.output is not None:
@@ -464,3 +491,9 @@ if __name__ == "__main__":
     # DONE!
     imsave(out_path, img_as_ubyte(img_out))
     logging.info("Output saved to {0}.".format(out_path))
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    main(args)
+

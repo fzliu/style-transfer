@@ -1,8 +1,8 @@
-name: "VGG_ILSVRC_19_layers"
+name: "VGG_ILSVRC_16_layers"
 input: "data"
 force_backward: true
 input_shape {
-  dim: 10
+  dim: 1
   dim: 3
   dim: 224
   dim: 224
@@ -125,14 +125,12 @@ layers {
     kernel_size: 3
   }
 }
-
 layers {
   bottom: "conv3_2"
   top: "conv3_2"
   name: "relu3_2"
   type: RELU
 }
-
 layers {
   bottom: "conv3_2"
   top: "conv3_3"
@@ -152,23 +150,6 @@ layers {
 }
 layers {
   bottom: "conv3_3"
-  top: "conv3_4"
-  name: "conv3_4"
-  type: CONVOLUTION
-  convolution_param {
-    num_output: 256
-    pad: 1
-    kernel_size: 3
-  }
-}
-layers {
-  bottom: "conv3_4"
-  top: "conv3_4"
-  name: "relu3_4"
-  type: RELU
-}
-layers {
-  bottom: "conv3_4"
   top: "pool3"
   name: "pool3"
   type: POOLING
@@ -231,23 +212,6 @@ layers {
 }
 layers {
   bottom: "conv4_3"
-  top: "conv4_4"
-  name: "conv4_4"
-  type: CONVOLUTION
-  convolution_param {
-    num_output: 512
-    pad: 1
-    kernel_size: 3
-  }
-}
-layers {
-  bottom: "conv4_4"
-  top: "conv4_4"
-  name: "relu4_4"
-  type: RELU
-}
-layers {
-  bottom: "conv4_4"
   top: "pool4"
   name: "pool4"
   type: POOLING
@@ -273,4 +237,49 @@ layers {
   top: "conv5_1"
   name: "relu5_1"
   type: RELU
+}
+layers {
+  bottom: "conv5_1"
+  top: "conv5_2"
+  name: "conv5_2"
+  type: CONVOLUTION
+  convolution_param {
+    num_output: 512
+    pad: 1
+    kernel_size: 3
+  }
+}
+layers {
+  bottom: "conv5_2"
+  top: "conv5_2"
+  name: "relu5_2"
+  type: RELU
+}
+layers {
+  bottom: "conv5_2"
+  top: "conv5_3"
+  name: "conv5_3"
+  type: CONVOLUTION
+  convolution_param {
+    num_output: 512
+    pad: 1
+    kernel_size: 3
+  }
+}
+layers {
+  bottom: "conv5_3"
+  top: "conv5_3"
+  name: "relu5_3"
+  type: RELU
+}
+layers {
+  bottom: "conv5_3"
+  top: "pool5"
+  name: "pool5"
+  type: POOLING
+  pooling_param {
+    pool: AVE
+    kernel_size: 2
+    stride: 2
+  }
 }
