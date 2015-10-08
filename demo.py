@@ -8,6 +8,7 @@ import argparse
 # library imports
 import caffe
 import cv2
+from skimage.transform import rescale
 
 # local imports
 from style import StyleTransfer
@@ -30,10 +31,10 @@ def st_api(img_style, img_content):
     global st
 
     # run iterations
-    all_args = [{"length": 360, "ratio": 4e2, "n_iter": 100},
+    all_args = [{"length": 360, "ratio": 4e2, "n_iter": 80},
                 {"length": 480, "ratio": 4e3, "n_iter": 20},
                 {"length": 640, "ratio": 4e4, "n_iter": 20}]
-    img_out = "content"
+    img_out = "mixed"
     for args in all_args:
         args["init"] = img_out
         st.transfer_style(img_style, img_content, **args)

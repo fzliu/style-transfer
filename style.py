@@ -271,6 +271,9 @@ class StyleTransfer(object):
         if self.use_pbar:
             def pbar_cbfn(xk):
                 self.grad_iter += 1
+                net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
+                img_iter = self.transformer.deprocess("data", net_in)
+                imsave("outputs/iter_{0}.jpg".format(self.grad_iter), img_iter)
                 try:
                     self.pbar.update(self.grad_iter)
                 except:
@@ -409,6 +412,9 @@ class StyleTransfer(object):
         # "content" = content image, see kaishengtai/neuralart
         if init == "content":
             img0 = self.transformer.preprocess("data", img_content)
+        elif init == "mixed":
+            img0 = 0.95*self.transformer.preprocess("data", img_content) + \
+                   0.05*self.transformer.preprocess("data", img_style)
         elif isinstance(init, np.ndarray):
             img0 = self.transformer.preprocess("data", init)
         else:
