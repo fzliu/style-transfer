@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 09/25/2015
+last modified: 10/06/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -26,10 +26,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-TODOs:
-  - Verify model_WEIGHTS is working as expected
-  - Add progress bar for minimize call
 """
 
 # system imports
@@ -42,55 +38,49 @@ import timeit
 # library imports
 import caffe
 import numpy as np
+import progressbar as pb
 from scipy.fftpack import ifftn
 from scipy.linalg.blas import sgemm
 from scipy.misc import imsave
 from scipy.optimize import minimize
+from skimage import img_as_ubyte
 from skimage.transform import rescale
 
-try:
-    import progressbar as pb
-    gradIter = 0
-    pbar = pb.ProgressBar()
-    USE_PROGRESSBAR = True
-except:
-    USE_PROGRESSBAR = False 
 
-CAFFE_ROOT = os.path.abspath(os.path.join(os.path.dirname(caffe.__file__), "..", ".."))
-MEAN_PATH = os.path.join(CAFFE_ROOT, "python", "caffe", "imagenet", "ilsvrc_2012_mean.npy")
-MODEL_DIR = "models"
+# logging
+LOG_FORMAT = "%(filename)s:%(funcName)s:%(asctime)s.%(msecs)03d -- %(message)s"
 
-# constants
+# numeric constants
 INF = np.float32(np.inf)
-STYLE_SCALE = 0.5
+STYLE_SCALE = 1.2
 
 # weights for the individual models
-VGG_WEIGHTS = {"content": {"conv4_2": 1},
-               "style": {"conv1_1": 0.2,
-                         "conv2_1": 0.2,
-                         "conv3_1": 0.2,
-                         "conv4_1": 0.2,
-                         "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 0.005,
-                                 "inception_3a/output": 0.995},
-                     "style": {"conv1/7x7_s2": 0.1,
-                               "conv2/3x3": 0.09,
-                               "inception_3a/output": 0.09,
-                               "inception_3b/output": 0.09,
-                               "inception_4a/output": 0.09,
-                               "inception_4b/output": 0.09,
-                               "inception_4c/output": 0.09,
-                               "inception_4d/output": 0.09,
-                               "inception_4e/output": 0.09,
-                               "inception_5a/output": 0.09,
-                               "inception_5b/output": 0.09,}}
-CAFFENET_WEIGHTS = {"content": {"conv3": 1},
+# assume that corresponding layers' top blob matches its name
+VGG19_WEIGHTS = {"content": {"conv4_2": 1},
+                 "style": {"conv1_1": 0.2,
+                           "conv2_1": 0.2,
+                           "conv3_1": 0.2,
+                           "conv4_1": 0.2,
+                           "conv5_1": 0.2}}
+VGG16_WEIGHTS = {"content": {"conv4_2": 1},
+                 "style": {"conv1_1": 0.2,
+                           "conv2_1": 0.2,
+                           "conv3_1": 0.2,
+                           "conv4_1": 0.2,
+                           "conv5_1": 0.2}}
+GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 2e-4,
+                                 "inception_3a/output": 1-2e-4},
+                     "style": {"conv1/7x7_s2": 0.2,
+                               "conv2/3x3": 0.2,
+                               "inception_3a/output": 0.2,
+                               "inception_4a/output": 0.2,
+                               "inception_5a/output": 0.2}}
+CAFFENET_WEIGHTS = {"content": {"conv4": 1},
                     "style": {"conv1": 0.2,
                               "conv2": 0.2,
                               "conv3": 0.2,
                               "conv4": 0.2,
                               "conv5": 0.2}}
-
 
 # argparse
 parser = argparse.ArgumentParser(description="Transfer the style of one image to another.",
@@ -98,13 +88,13 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="vgg", type=str, required=False, help="model to use")
+parser.add_argument("-m", "--model", default="vgg19", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
 parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
-parser.add_argument("-n", "--num-iters", default=500, type=int, required=False, help="L-BFGS iterations")
-parser.add_argument("-l", "--length", default=640, type=float, required=False, help="maximum image length")
+parser.add_argument("-n", "--num-iters", default=512, type=int, required=False, help="L-BFGS iterations")
+parser.add_argument("-l", "--length", default=512, type=float, required=False, help="maximum image length")
 parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
-parser.add_argument("-o", "--output", default="outputs/result.jpg", required=False, help="output path")
+parser.add_argument("-o", "--output", default=None, required=False, help="output path")
 
 
 def _compute_style_grad(F, G, G_style, layer):
@@ -134,15 +124,15 @@ def _compute_content_grad(F, F_content, layer):
 
     return loss, grad
 
-def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
+def _compute_reprs(net_in, net, layers_style, layers_content, gram_scale=1):
     """
         Computes representation matrices for an image.
     """
 
-    # copy activations to output from forward pass
+    # input data and forward pass
     (repr_s, repr_c) = ({}, {})
     net.blobs["data"].data[0] = net_in
-    net.forward(end=net.params.keys()[-1])
+    net.forward()
 
     # loop through combined set of layers
     for layer in set(layers_style)|set(layers_content):
@@ -150,35 +140,55 @@ def _compute_reprs(net, layers_style, layers_content, net_in, scale_gram=1):
         F.shape = (F.shape[0], -1)
         repr_c[layer] = F
         if layer in layers_style:
-            repr_s[layer] = sgemm(scale_gram, F, F.T)
+            repr_s[layer] = sgemm(gram_scale, F, F.T)
 
     return repr_s, repr_c
 
-def style_optfn(x, net, weights, G_style, F_content, ratio):
+def style_optfn(x, net, weights, layers, reprs, ratio):
     """
         Style transfer optimization callback for scipy.optimize.minimize().
+
+        :param numpy.ndarray x:
+            Flattened data array.
+
+        :param caffe.Net net:
+            Network to use to generate gradients.
+
+        :param dict weights:
+            Weights to use in the network.
+
+        :param list layers:
+            Layers to use in the network.
+
+        :param tuple reprs:
+            Representation matrices packed in a tuple.
+
+        :param float ratio:
+            Style-to-content ratio.
     """
 
-    # initialize update params
-    layers_all = net.params.keys()[::-1]
+    # update params
     layers_style = weights["style"].keys()
     layers_content = weights["content"].keys()
     net_in = x.reshape(net.blobs["data"].data.shape[1:])
-    (G, F) = _compute_reprs(net, layers_style, layers_content, net_in)
+
+    # compute representations
+    (G_style, F_content) = reprs
+    (G, F) = _compute_reprs(net_in, net, layers_style, layers_content)
 
     # backprop by layer
     loss = 0
-    net.blobs[layers_all[-1]].diff[:] = 0
-    for i, layer in enumerate(layers_all):
-        next_layer = None if i == len(layers_all)-1 else layers_all[i+1]
+    net.blobs[layers[-1]].diff[:] = 0
+    for i, layer in enumerate(reversed(layers)):
+        next_layer = None if i == len(layers)-1 else layers[-i-2]
         grad = net.blobs[layer].diff[0]
 
         # style contribution
         if layer in layers_style:
             wl = weights["style"][layer]
             (l, g) = _compute_style_grad(F, G, G_style, layer)
-            loss += ratio * wl * l
-            grad += ratio * wl * g.reshape(grad.shape)
+            loss += wl * l * ratio
+            grad += wl * g.reshape(grad.shape) * ratio
 
         # content contribution
         if layer in layers_content:
@@ -199,55 +209,78 @@ def style_optfn(x, net, weights, G_style, F_content, ratio):
 
     return loss, grad
 
-def progress_callback(Xi):
-    global gradIter
-    global pbar
-    try:
-        pbar.update(gradIter)
-    except:
-        pbar.finished = True
-    gradIter += 1
-
 class StyleTransfer(object):
     """
         Style transfer class.
     """
 
-    def __init__(self, model_name):
+    def __init__(self, model_name, use_pbar=True):
         """
             Initialize the model used for style transfer.
 
             :param str model_name:
                 Model to use.
 
-            :param tuple scale_output:
-                Output scale to use.
+            :param bool use_pbar:
+                Use progressbar flag.
         """
 
+        base_path = os.path.join("models", model_name)
+
+        # vgg19
+        if model_name == "vgg19":
+            model_file = os.path.join(base_path, "VGG_ILSVRC_19_layers_deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "VGG_ILSVRC_19_layers.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
+            weights = VGG19_WEIGHTS
+
+        # vgg16
+        elif model_name == "vgg16":
+            model_file = os.path.join(base_path, "VGG_ILSVRC_16_layers_deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "VGG_ILSVRC_16_layers.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
+            weights = VGG16_WEIGHTS
+
         # googlenet
-        if model_name == "googlenet":
-            model_file = os.path.join(MODEL_DIR, model_name, "deploy.prototxt")
-            pretrained_file = os.path.join(MODEL_DIR, model_name, "bvlc_googlenet.caffemodel")
+        elif model_name == "googlenet":
+            model_file = os.path.join(base_path, "deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "googlenet_style.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
             weights = GOOGLENET_WEIGHTS
 
-        # vgg net
-        elif model_name == "vgg":
-            model_file = os.path.join(MODEL_DIR, model_name, "VGG_ILSVRC_19_layers_deploy.prototxt")
-            pretrained_file = os.path.join(MODEL_DIR, model_name, "VGG_ILSVRC_19_layers.caffemodel")
-            weights = VGG_WEIGHTS
-
-        # default (caffenet)
-        else:
-            model_file = os.path.join(MODEL_DIR, model_name, "deploy.prototxt")
-            pretrained_file = os.path.join(MODEL_DIR, model_name, "bvlc_reference_caffenet.caffemodel")
+        # caffenet
+        elif model_name == "caffenet":
+            model_file = os.path.join(base_path, "deploy.prototxt")
+            pretrained_file = os.path.join(base_path, "bvlc_reference_caffenet.caffemodel")
+            mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
             weights = CAFFENET_WEIGHTS
 
-        # load model and scale factors
-        self.load_model(model_file, pretrained_file)
+        else:
+            assert False, "model not available"
+
+        # add model and weights
+        self.load_model(model_file, pretrained_file, mean_file)
         self.weights = weights.copy()
+        self.use_pbar = use_pbar
+        self.layers = []
+        for layer in self.net.params.keys():
+            if layer in self.weights["style"] or layer in self.weights["content"]:
+                self.layers.append(layer)
 
+        # create progress bar callback
+        if self.use_pbar:
+            def pbar_cbfn(xk):
+                self.grad_iter += 1
+                net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
+                img_iter = self.transformer.deprocess("data", net_in)
+                imsave("outputs/iter_{0}.jpg".format(self.grad_iter), img_iter)
+                try:
+                    self.pbar.update(self.grad_iter)
+                except:
+                    self.pbar.finished = True
+            self.pbar_cbfn = pbar_cbfn
 
-    def load_model(self, model_file, pretrained_file):
+    def load_model(self, model_file, pretrained_file, mean_file):
         """
             Loads specified model from caffe install (see caffe docs).
 
@@ -256,14 +289,14 @@ class StyleTransfer(object):
 
             :param str pretrained_file:
                 Path to pretrained caffe model.
+
+            :param str mean_file:
+                Path to mean file.
         """
 
-        assert(os.path.isfile(model_file))
-        assert(os.path.isfile(pretrained_file))
-
-        # load net (supressing output)
-        out_orig = os.dup(2)
+        # load net (supressing stderr output)
         null_fds = os.open(os.devnull, os.O_RDWR)
+        out_orig = os.dup(2)
         os.dup2(null_fds, 2)
         net = caffe.Net(model_file, pretrained_file, caffe.TEST)
         os.dup2(out_orig, 2)
@@ -271,7 +304,7 @@ class StyleTransfer(object):
 
         # all models used are trained on imagenet data
         transformer = caffe.io.Transformer({"data": net.blobs["data"].data.shape})
-        transformer.set_mean("data", np.load(MEAN_PATH).mean(1).mean(1))
+        transformer.set_mean("data", np.load(mean_file).mean(1).mean(1))
         transformer.set_channel_swap("data", (2,1,0))
         transformer.set_transpose("data", (2,0,1))
         transformer.set_raw_scale("data", 255)
@@ -280,7 +313,7 @@ class StyleTransfer(object):
         self.net = net
         self.transformer = transformer
 
-    def save_generated(self, path):
+    def get_generated(self):
         """
             Saves the generated image (net input, after optimization).
 
@@ -288,21 +321,16 @@ class StyleTransfer(object):
                 Output path.
         """
 
-        # check output directory
-        if os.path.dirname(path):
-            if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
-
-        # prettify the generated image and save it
-        img = self.transformer.deprocess("data", self.net.blobs["data"].data)
-        img = (255*img).astype(np.uint8)
-        imsave(path, img)
+        data = self.net.blobs["data"].data
+        img_out = self.transformer.deprocess("data", data)
+        return img_out
     
     def _rescale_net(self, img):
         """
             Rescales the network to fit a particular image.
         """
 
+        # get new dimensions and rescale net + transformer
         new_dims = (1, img.shape[2]) + img.shape[:2]
         self.net.blobs["data"].reshape(*new_dims)
         self.transformer.inputs["data"] = new_dims
@@ -336,8 +364,20 @@ class StyleTransfer(object):
 
         return x0
 
-    def transfer_style(self, img_style, img_content, length=640,
-                       ratio=1e5, n_iter=500, init=None, verbose=False):
+    def _create_pbar(self, max_iter):
+        """
+            Creates a progress bar.
+        """
+
+        self.grad_iter = 0
+        self.pbar = pb.ProgressBar()
+        self.pbar.widgets = ["Optimizing: ", pb.Percentage(), 
+                             " ", pb.Bar(marker=pb.AnimatedMarker()),
+                             " ", pb.ETA()]
+        self.pbar.maxval = max_iter
+
+    def transfer_style(self, img_style, img_content, length=512,
+                       ratio=1e5, n_iter=512, init="-1", verbose=False):
         """
             Transfers the style of the artwork to the input image.
 
@@ -345,33 +385,38 @@ class StyleTransfer(object):
                 A style image with the desired target style.
 
             :param numpy.ndarray img_content:
-                A content image in 8-bit, RGB format.
+                A content image in floating point, RGB format.
         """
 
         # rescale the images
         scale = length / float(max(img_style.shape[:2]))
-        img_style = rescale(img_style, STYLE_SCALE*scale, order=3)
+        img_style = rescale(img_style, STYLE_SCALE*scale)
         scale = length / float(max(img_content.shape[:2]))
-        img_content = rescale(img_content, scale, order=3)
+        img_content = rescale(img_content, scale)
 
         # compute style representations
         self._rescale_net(img_style)
         layers = self.weights["style"].keys()
         net_in = self.transformer.preprocess("data", img_style)
-        scale_gram = float(img_content.size)/img_style.size
-        (G_style, _) = _compute_reprs(self.net, layers, [], net_in,
-                                      scale_gram=scale_gram)
+        gram_scale = float(img_content.size)/img_style.size
+        G_style = _compute_reprs(net_in, self.net, layers, [],
+                                 gram_scale=1)[0]
 
         # compute content representations
         self._rescale_net(img_content)
         layers = self.weights["content"].keys()
         net_in = self.transformer.preprocess("data", img_content)
-        (_, F_content) = _compute_reprs(self.net, [], layers, net_in)
+        F_content = _compute_reprs(net_in, self.net, [], layers)[1]
 
         # generate initial net input
-        # default = content image, see kaishengtai/neuralart
+        # "content" = content image, see kaishengtai/neuralart
         if init == "content":
             img0 = self.transformer.preprocess("data", img_content)
+        elif init == "mixed":
+            img0 = 0.95*self.transformer.preprocess("data", img_content) + \
+                   0.05*self.transformer.preprocess("data", img_style)
+        elif isinstance(init, np.ndarray):
+            img0 = self.transformer.preprocess("data", init)
         else:
             img0 = self._make_noise_input(init)
 
@@ -382,33 +427,35 @@ class StyleTransfer(object):
                       [(data_min[1], data_max[1])]*(img0.size/3) + \
                       [(data_min[2], data_max[2])]*(img0.size/3)
 
-        # perform optimization
-        minfn_args = (self.net, self.weights, G_style, F_content, ratio)
+        # optimization params
         grad_method = "L-BFGS-B"
+        reprs = (G_style, F_content)
+        minfn_args = {
+            "args": (self.net, self.weights, self.layers, reprs, ratio),
+            "method": grad_method, "jac": True, "bounds": data_bounds,
+            "options": {"maxcor": 8, "maxiter": n_iter, "disp": verbose}
+        }
 
-        if USE_PROGRESSBAR and not verbose:
-            global pbar
-            pbar.widgets = ['Progress: ', 
-                pb.Percentage(), ' ', pb.Bar(marker=pb.AnimatedMarker()),
-                ' ', pb.ETA()]
-            pbar.maxval = n_iter
-            pbar.start()
-            return minimize(style_optfn, img0.flatten(), callback=progress_callback,
-                            args=minfn_args, method=grad_method, jac=True, bounds=data_bounds,
-                            options={"maxiter": n_iter, "disp": verbose}).nit
+        # optimize
+        if self.use_pbar and not verbose:
+            self._create_pbar(n_iter)
+            minfn_args["callback"] = self.pbar_cbfn
+            self.pbar.start()
+            res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
+            self.pbar.finish()
         else:
-            if not verbose: print "Progress display requires the progressbar library."
-            return minimize(style_optfn, img0.flatten(), args=minfn_args, 
-                            method=grad_method, jac=True, bounds=data_bounds, 
-                            options={"maxiter": n_iter, "disp": verbose}).nit
+            res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
 
-if __name__ == "__main__":
-    args = parser.parse_args()
+        return res
+
+def main(args):
+    """
+        Entry point.
+    """
 
     # logging
-    format = "%(filename)s:%(lineno)d  %(asctime)s -- %(message)s"
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(format=format, level=level)
+    level = logging.INFO if args.verbose else logging.DEBUG
+    logging.basicConfig(format=LOG_FORMAT, datefmt="%H:%M:%S", level=level)
     logging.info("Starting style transfer.")
 
     # set GPU/CPU mode
@@ -417,6 +464,7 @@ if __name__ == "__main__":
         logging.info("Running net on CPU.")
     else:
         caffe.set_device(args.gpu_id)
+        caffe.set_mode_gpu()
         logging.info("Running net on GPU {0}.".format(args.gpu_id))
 
     # load images
@@ -425,21 +473,33 @@ if __name__ == "__main__":
     logging.info("Successfully loaded images.")
     
     # artistic style class
-    st = StyleTransfer(args.model.lower())
+    st = StyleTransfer(args.model.lower(), use_pbar=True)
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
-    if not args.verbose: print "Creating art takes time..."
     start = timeit.default_timer()
     n_iters = st.transfer_style(img_style, img_content, length=args.length, 
                                 init=args.init, ratio=np.float(args.ratio), 
                                 n_iter=args.num_iters, verbose=args.verbose)
     end = timeit.default_timer()
     logging.info("Ran {0} iterations in {1:.0f}s.".format(n_iters, end-start))
-    if USE_PROGRESSBAR and not args.verbose:
-        pbar.finish()
+    img_out = st.get_generated()
 
+    # output path
+    if args.output is not None:
+        out_path = args.output
+    else:
+        out_path_fmt = (os.path.splitext(os.path.split(args.content_img)[1])[0], 
+                        os.path.splitext(os.path.split(args.style_img)[1])[0], 
+                        args.model, args.init, args.ratio, args.num_iters)
+        out_path = "outputs/{0}-{1}-{2}-{3}-{4}-{5}.jpg".format(*out_path_fmt)
 
     # DONE!
-    st.save_generated(args.output)
-    logging.info("Output saved to {0}.".format(args.output))
+    imsave(out_path, img_as_ubyte(img_out))
+    logging.info("Output saved to {0}.".format(out_path))
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    main(args)
+

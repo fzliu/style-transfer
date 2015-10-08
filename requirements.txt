@@ -1,6 +1,4 @@
-REQUIRED:
-    numpy>=1.7.1
-    scipy>=0.13.2
-    scikit-image>=0.9.3
-OPTIONAL:
-    progressbar>=2.3
+numpy>=1.7.1
+scipy>=0.13.2
+scikit-image>=0.9.3
+progressbar>=2.3
