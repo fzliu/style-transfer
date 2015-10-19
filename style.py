@@ -274,7 +274,6 @@ class StyleTransfer(object):
                 self.grad_iter += 1
                 net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
                 img_iter = self.transformer.deprocess("data", net_in)
-                imsave("outputs/iter_{0}.jpg".format(self.grad_iter), img_iter)
                 try:
                     self.pbar.update(self.grad_iter)
                 except:
