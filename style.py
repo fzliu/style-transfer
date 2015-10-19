@@ -225,7 +225,8 @@ class StyleTransfer(object):
                 Use progressbar flag.
         """
 
-        base_path = os.path.join("models", model_name)
+        style_path = os.path.abspath(os.path.dirname(__file__))
+        base_path = os.path.join(style_path, "models", model_name)
 
         # vgg19
         if model_name == "vgg19":
