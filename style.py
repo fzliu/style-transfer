@@ -68,8 +68,7 @@ VGG16_WEIGHTS = {"content": {"conv4_2": 1},
                            "conv3_1": 0.2,
                            "conv4_1": 0.2,
                            "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"conv2/3x3": 2e-4,
-                                 "inception_3a/output": 1-2e-4},
+GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 1},
                      "style": {"conv1/7x7_s2": 0.2,
                                "conv2/3x3": 0.2,
                                "inception_3a/output": 0.2,
@@ -225,7 +224,7 @@ class StyleTransfer(object):
                 Use progressbar flag.
         """
 
-        style_path = os.path.abspath(os.path.dirname(__file__))
+        style_path = os.path.abspath(os.path.split(__file__)[0])
         base_path = os.path.join(style_path, "models", model_name)
 
         # vgg19
@@ -262,23 +261,29 @@ class StyleTransfer(object):
         # add model and weights
         self.load_model(model_file, pretrained_file, mean_file)
         self.weights = weights.copy()
-        self.use_pbar = use_pbar
         self.layers = []
         for layer in self.net.params.keys():
             if layer in self.weights["style"] or layer in self.weights["content"]:
                 self.layers.append(layer)
+        self.use_pbar = use_pbar
 
-        # create progress bar callback
+        # set the callback function
         if self.use_pbar:
-            def pbar_cbfn(xk):
+            def callback(xk):
                 self.grad_iter += 1
-                net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
-                img_iter = self.transformer.deprocess("data", net_in)
                 try:
                     self.pbar.update(self.grad_iter)
                 except:
                     self.pbar.finished = True
-            self.pbar_cbfn = pbar_cbfn
+                if self._callback is not None:
+                    net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
+                    self._callback(self.transformer.deprocess("data", net_in))
+        else:
+            def callback(xk):
+                if self._callback is not None:
+                    net_in = xk.reshape(self.net.blobs["data"].data.shape[1:])
+                    self._callback(self.transformer.deprocess("data", net_in))
+        self.callback = callback
 
     def load_model(self, model_file, pretrained_file, mean_file):
         """
@@ -376,8 +381,8 @@ class StyleTransfer(object):
                              " ", pb.ETA()]
         self.pbar.maxval = max_iter
 
-    def transfer_style(self, img_style, img_content, length=512,
-                       ratio=1e5, n_iter=512, init="-1", verbose=False):
+    def transfer_style(self, img_style, img_content, length=512, ratio=1e5,
+                       n_iter=512, init="-1", verbose=False, callback=None):
         """
             Transfers the style of the artwork to the input image.
 
@@ -386,12 +391,20 @@ class StyleTransfer(object):
 
             :param numpy.ndarray img_content:
                 A content image in floating point, RGB format.
+
+            :param function callback:
+                A callback function, which takes images at iterations.
         """
 
+        # assume that convnet input is square
+        orig_dim = min(self.net.blobs["data"].shape[2:])
+
         # rescale the images
-        scale = length / float(max(img_style.shape[:2]))
+        scale = max(length / float(max(img_style.shape[:2])),
+                    orig_dim / float(min(img_style.shape[:2])))
         img_style = rescale(img_style, STYLE_SCALE*scale)
-        scale = length / float(max(img_content.shape[:2]))
+        scale = max(length / float(max(img_content.shape[:2])),
+                    orig_dim / float(min(img_content.shape[:2])))
         img_content = rescale(img_content, scale)
 
         # compute style representations
@@ -410,13 +423,13 @@ class StyleTransfer(object):
 
         # generate initial net input
         # "content" = content image, see kaishengtai/neuralart
-        if init == "content":
+        if isinstance(init, np.ndarray):
+            img0 = self.transformer.preprocess("data", init)
+        elif init == "content":
             img0 = self.transformer.preprocess("data", img_content)
         elif init == "mixed":
             img0 = 0.95*self.transformer.preprocess("data", img_content) + \
                    0.05*self.transformer.preprocess("data", img_style)
-        elif isinstance(init, np.ndarray):
-            img0 = self.transformer.preprocess("data", init)
         else:
             img0 = self._make_noise_input(init)
 
@@ -437,9 +450,10 @@ class StyleTransfer(object):
         }
 
         # optimize
+        self._callback = callback
+        minfn_args["callback"] = self.callback
         if self.use_pbar and not verbose:
             self._create_pbar(n_iter)
-            minfn_args["callback"] = self.pbar_cbfn
             self.pbar.start()
             res = minimize(style_optfn, img0.flatten(), **minfn_args).nit
             self.pbar.finish()
