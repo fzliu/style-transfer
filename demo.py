@@ -23,9 +23,21 @@ parser.add_argument("-s", "--style-img", type=str, required=True, help="input st
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
 
 # style transfer
-# hard-code workers, each backed by a lock
+# style workers, each should be backed by a lock
 workers = {}
 
+
+def gpu_count():
+    """
+        Counts the number of CUDA-capable GPUs (Linux only).
+    """
+
+    # use nvidia-smi to count number of GPUs
+    try:
+        output = subprocess.check_output("nvidia-smi -L")
+        return len(output.strip().split("\n"))
+    except:
+        return 0
 
 def init(n_workers=1):
     """
@@ -34,6 +46,10 @@ def init(n_workers=1):
 
     global workers
 
+    if n_workers == 0:
+        n_workers = 1
+
+    # assign a lock to each worker
     for i in range(n_workers):
         worker = StyleTransfer("googlenet", use_pbar=False)
         workers.update({Lock(): worker})
