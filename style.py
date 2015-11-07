@@ -263,7 +263,7 @@ class StyleTransfer(object):
         self.load_model(model_file, pretrained_file, mean_file)
         self.weights = weights.copy()
         self.layers = []
-        for layer in self.net.params.keys():
+        for layer in self.net.blobs:
             if layer in self.weights["style"] or layer in self.weights["content"]:
                 self.layers.append(layer)
         self.use_pbar = use_pbar
