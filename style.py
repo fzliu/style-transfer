@@ -488,7 +488,8 @@ def main(args):
     logging.info("Successfully loaded images.")
     
     # artistic style class
-    st = StyleTransfer(args.model.lower(), use_pbar=True)
+    use_pbar = not args.verbose
+    st = StyleTransfer(args.model.lower(), use_pbar=use_pbar)
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
