@@ -1,6 +1,5 @@
 name: "VGG_ILSVRC_19_layer"
 input: "data"
-force_backward: true
 input_shape {
   dim: 1
   dim: 3

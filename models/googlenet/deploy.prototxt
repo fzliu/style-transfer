@@ -1,6 +1,5 @@
 name: "GoogleNet"
 input: "data"
-force_backward: true
 input_shape {
   dim: 1
   dim: 3
