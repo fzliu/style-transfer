@@ -87,10 +87,10 @@ parser = argparse.ArgumentParser(description="Transfer the style of one image to
                                  usage="style.py -s <style_image> -c <content_image>")
 parser.add_argument("-s", "--style-img", type=str, required=True, help="input style (art) image")
 parser.add_argument("-c", "--content-img", type=str, required=True, help="input content image")
-parser.add_argument("-g", "--gpu-id", default=-1, type=int, required=False, help="GPU device number")
-parser.add_argument("-m", "--model", default="vgg19", type=str, required=False, help="model to use")
+parser.add_argument("-g", "--gpu-id", default=0, type=int, required=False, help="GPU device number")
+parser.add_argument("-m", "--model", default="vgg16", type=str, required=False, help="model to use")
 parser.add_argument("-i", "--init", default="content", type=str, required=False, help="initialization strategy")
-parser.add_argument("-r", "--ratio", default="1e5", type=str, required=False, help="style-to-content ratio")
+parser.add_argument("-r", "--ratio", default="1e4", type=str, required=False, help="style-to-content ratio")
 parser.add_argument("-n", "--num-iters", default=512, type=int, required=False, help="L-BFGS iterations")
 parser.add_argument("-l", "--length", default=512, type=float, required=False, help="maximum image length")
 parser.add_argument("-v", "--verbose", action="store_true", required=False, help="print minimization outputs")
@@ -263,7 +263,7 @@ class StyleTransfer(object):
         self.load_model(model_file, pretrained_file, mean_file)
         self.weights = weights.copy()
         self.layers = []
-        for layer in self.net.params.keys():
+        for layer in self.net.blobs:
             if layer in self.weights["style"] or layer in self.weights["content"]:
                 self.layers.append(layer)
         self.use_pbar = use_pbar
@@ -488,7 +488,8 @@ def main(args):
     logging.info("Successfully loaded images.")
     
     # artistic style class
-    st = StyleTransfer(args.model.lower(), use_pbar=True)
+    use_pbar = not args.verbose
+    st = StyleTransfer(args.model.lower(), use_pbar=use_pbar)
     logging.info("Successfully loaded model {0}.".format(args.model))
 
     # perform style transfer
