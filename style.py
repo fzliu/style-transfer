@@ -98,12 +98,13 @@ def style_optfn(x, net, weights, ratio):
             Style-to-content ratio.
     """
 
-    # prepare the input
+    # prepare the input, then run the net
     net_in = x.reshape(net.blobs[DATA].data.shape[1:])
     net.blobs[DATA].data[0] = net_in
-
-    # run net forwards to get the losses
     net.forward()
+    net.backward()
+
+    # compute loss
     loss = 0.0
     for name, weight in weights["style"].iteritems():
         loss_name = name + GRAM_SUFFIX + LOSS_SUFFIX
@@ -112,8 +113,7 @@ def style_optfn(x, net, weights, ratio):
         loss_name = name + LOSS_SUFFIX
         loss += net.blobs[loss_name].data * weight
 
-    # run net backwards to get the gradient image
-    net.backward()
+    # get gradients
     grad = net.blobs[DATA].diff[0]
     grad = grad.flatten().astype(np.float64)
 
