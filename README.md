@@ -2,6 +2,8 @@
 
 ## Introduction
 
+(This branch makes use of [dpaiton](https://github.com/dpaiton)'s [Gramian layer](https://github.com/dpaiton/caffe/tree/gramian) in Caffe to greatly speed up GPU computation. If you do not have the Gramian layer installed, or if you're using an older version of Caffe, checkout master instead.)
+
 This repository contains a pyCaffe-based implementation of "A Neural Algorithm of Artistic Style" by L. Gatys, A. Ecker, and M. Bethge, which presents a method for transferring the artistic style of one input image onto another. You can read the paper here: http://arxiv.org/abs/1508.06576. 
 
 Neural net operations are handled by Caffe, while loss minimization and other miscellaneous matrix operations are performed using numpy and scipy. L-BFGS is used for minimization.
