@@ -10,7 +10,6 @@ import time
 
 # library imports
 import caffe
-import cv2
 from scipy.misc.pilutil import imshow
 from skimage.transform import rescale
 
