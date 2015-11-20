@@ -441,10 +441,10 @@ class StyleTransfer(object):
 
         # set the device
         if self.gpu_id == -1:
-            self.set_mode_cpu()
+            caffe.set_mode_cpu()
         else:
-            self.set_device(self.gpu_id)
-            self.set_mode_gpu()
+            caffe.set_device(self.gpu_id)
+            caffe.set_mode_gpu()
 
         # optimize
         self._callback = callback
