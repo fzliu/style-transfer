@@ -124,7 +124,7 @@ class StyleTransfer(object):
         Style transfer class.
     """
 
-    def __init__(self, model_name, use_pbar=True):
+    def __init__(self, model_name, use_pbar=True, gpu_id=-1):
         """
             Initialize the model used for style transfer.
 
@@ -134,6 +134,10 @@ class StyleTransfer(object):
             :param bool use_pbar:
                 Use progressbar flag.
         """
+
+        # set the GPU ID
+        # this is needed if we're many of these
+        self.gpu_id = gpu_id
 
         # load parameters and model
         (self.model_path,
@@ -435,6 +439,13 @@ class StyleTransfer(object):
             "options": {"maxcor": 8, "maxiter": n_iter, "disp": verbose}
         }
 
+        # set the device
+        if self.gpu_id == -1:
+            self.set_mode_cpu()
+        else:
+            self.set_device(self.gpu_id)
+            self.set_mode_gpu()
+
         # optimize
         self._callback = callback
         minfn_args["callback"] = self.callback
@@ -460,11 +471,8 @@ def main(args):
 
     # set GPU/CPU mode
     if args.gpu_id == -1:
-        caffe.set_mode_cpu()
         logging.info("Running net on CPU.")
     else:
-        caffe.set_device(args.gpu_id)
-        caffe.set_mode_gpu()
         logging.info("Running net on GPU {0}.".format(args.gpu_id))
 
     # load images
@@ -474,7 +482,7 @@ def main(args):
     
     # artistic style class
     use_pbar = not args.verbose
-    st = StyleTransfer(args.model.lower(), use_pbar=use_pbar)
+    st = StyleTransfer(args.model.lower(), use_pbar=use_pbar, gpu_id=args.gpu_id)
     logging.info("Successfully initialized model {0}.".format(args.model))
 
     # perform style transfer
