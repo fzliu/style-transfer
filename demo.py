@@ -11,6 +11,7 @@ import time
 # library imports
 import caffe
 import cv2
+from scipy.misc.pilutil import imshow
 from skimage.transform import rescale
 
 # local imports
@@ -103,9 +104,7 @@ def main(args):
     result = st_api(img_style, img_content)
 
     # show the image
-    cv2.imshow("Art", cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
-    cv2.waitKey()
-    cv2.destroyWindow("Art")
+    imshow("Art", result)
 
 
 if __name__ == "__main__":
