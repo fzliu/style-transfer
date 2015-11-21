@@ -1179,12 +1179,3 @@ layer {
     kernel_size: 7
   }
 }
-layer {
-  bottom: "pool5/7x7_s1"
-  name: "pool5/drop_7x7_s1"
-  top: "pool5/7x7_s1"
-  type: "Dropout"
-  dropout_param {
-    dropout_ratio: 0.4
-  }
-}
