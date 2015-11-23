@@ -4,7 +4,7 @@ by L. Gatys, A. Ecker, and M. Bethge. http://arxiv.org/abs/1508.06576.
 
 authors: Frank Liu - frank@frankzliu.com
          Dylan Paiton - dpaiton@gmail.com
-last modified: 11/19/2015
+last modified: 11/23/2015
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -58,7 +58,7 @@ LOG_FORMAT = "%(filename)s:%(funcName)s:%(asctime)s.%(msecs)03d -- %(message)s"
 
 # numeric constants
 INF = np.float32(np.inf)
-STYLE_SCALE = 1.2
+STYLE_SCALE = 1.0
 
 # model-related constants
 DATA = "data"

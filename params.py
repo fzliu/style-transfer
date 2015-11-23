@@ -17,7 +17,7 @@ VGG16_WEIGHTS = {"content": {"conv4_2": 1},
                            "conv3_1": 0.2,
                            "conv4_1": 0.2,
                            "conv5_1": 0.2}}
-GOOGLENET_WEIGHTS = {"content": {"inception_3a/output": 1},
+GOOGLENET_WEIGHTS = {"content": {"inception_3b/output": 1},
                      "style": {"conv1/7x7_s2": 0.2,
                                "conv2/3x3": 0.2,
                                "inception_3a/output": 0.2,
