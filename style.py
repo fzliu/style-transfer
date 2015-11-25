@@ -379,6 +379,13 @@ class StyleTransfer(object):
                 A callback function, which takes images at iterations.
         """
 
+        # set the device
+        if self.gpu_id == -1:
+            caffe.set_mode_cpu()
+        else:
+            caffe.set_device(self.gpu_id)
+            caffe.set_mode_gpu()
+
         # assume that convnet input is square
         orig_dim = min(self.net.blobs[DATA].shape[2:])
 
@@ -438,13 +445,6 @@ class StyleTransfer(object):
             "method": "L-BFGS-B", "jac": True, "bounds": data_bounds,
             "options": {"maxcor": 8, "maxiter": n_iter, "disp": verbose}
         }
-
-        # set the device
-        if self.gpu_id == -1:
-            caffe.set_mode_cpu()
-        else:
-            caffe.set_device(self.gpu_id)
-            caffe.set_mode_gpu()
 
         # optimize
         self._callback = callback
