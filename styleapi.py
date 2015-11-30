@@ -38,9 +38,8 @@ parser.add_argument("-r", "--redis-url", type=str, required=True, help="redis DB
 api_insts = {}
 
 # @TODO: this is a hack to make the style transfer object visible during the job
-if "ST_GPU_ID" in os.environ:
-    gpu_id = -1 if os.environ["ST_GPU_ID"] < 0 else int(os.environ["ST_GPU_ID"])
-    st_inst = StyleTransfer("googlenet", use_pbar=False, gpu_id=gpu_id)
+# for a system with multiple GPUs, need to set CUDA_VISIBLE_DEVICES for each process
+st_inst = StyleTransfer("googlenet", use_pbar=False, gpu_id=0)
 
 
 def gpu_count():
