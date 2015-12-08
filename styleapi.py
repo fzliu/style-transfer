@@ -27,7 +27,7 @@ from style import StyleTransfer
 
 
 # style args
-BASE_STYLE_ARGS = {"length": 512, "ratio": 1e5, "n_iter": 79}
+BASE_STYLE_ARGS = {"length": 512, "ratio": 1e5, "n_iter": 49}
 
 # argparse
 parser = argparse.ArgumentParser(description="Start up style processes, which read from Redis.",
@@ -156,7 +156,7 @@ def style_worker(pimg_style_data, pimg_content_data):
 
     # declare worker callback
     def callback(img_iter):
-        job.meta["progress"] += 1.25
+        job.meta["progress"] += 2.0
         job.meta["result"] = image_to_base64(img_iter)
         job.save()
 
