@@ -245,7 +245,7 @@ class StyleTransfer(object):
         # googlenet
         elif model_name == "googlenet":
             model_file = os.path.join(base_path, "deploy.prototxt")
-            pretrained_file = os.path.join(base_path, "googlenet_style.caffemodel")
+            pretrained_file = os.path.join(base_path, "bvlc_googlenet.caffemodel")
             mean_file = os.path.join(base_path, "ilsvrc_2012_mean.npy")
             weights = GOOGLENET_WEIGHTS
 
