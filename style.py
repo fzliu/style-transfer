@@ -304,7 +304,7 @@ class StyleTransfer(object):
         null_fds = os.open(os.devnull, os.O_RDWR)
         out_orig = os.dup(2)
         os.dup2(null_fds, 2)
-        net = caffe.Net(model_file, pretrained_file, caffe.TEST)
+        net = caffe.Net(str(model_file), str(pretrained_file), caffe.TEST)
         os.dup2(out_orig, 2)
         os.close(null_fds)
 
